@@ -71,8 +71,17 @@ function mostrarExecucao(execucao) {
   if (execucao.status === "SUCESSO" && execucao.dados_extraidos) {
     const item = execucao.dados_extraidos;
     campo("Fonte", item.fonte);
-    if ("periodo_referencia" in item) {
-      campo("Administradora", item.administradora ?? "Não disponível no conjunto agregado");
+    if ("credito_medio" in item) {
+      campo("Segmento", item.segmento === "Total" ? "Mercado total" : item.segmento);
+      campo("Período de referência", item.periodo_referencia);
+      campo("Cotas ativas", numero(item.cotas_ativas));
+      if (item.credito_medio !== null) campo("Crédito médio", `R$ ${Number(item.credito_medio).toLocaleString("pt-BR", {minimumFractionDigits: 2, maximumFractionDigits: 2})}`);
+      if (item.prazo_medio !== null) campo("Prazo médio", `${Number(item.prazo_medio).toLocaleString("pt-BR")} meses`);
+      if (item.taxa_administracao_media !== null) campo("Taxa média de administração", `${Number(item.taxa_administracao_media).toLocaleString("pt-BR", {minimumFractionDigits: 2, maximumFractionDigits: 2})}%`);
+      if (item.contemplacoes !== null) campo("Contemplações (últimos 12 meses)", numero(item.contemplacoes));
+      if (item.campos_indisponiveis.length) campo("Indicadores indisponíveis", item.campos_indisponiveis.join(", "));
+      campo("Consultado em", new Date(item.data_consulta).toLocaleString("pt-BR"));
+    } else if ("periodo_referencia" in item) {
       campo("Período de referência", item.periodo_referencia);
       campo("Abrangência", item.abrangencia);
       if (item.segmento) campo("Segmento", item.segmento);
@@ -105,7 +114,7 @@ function mostrarExecucao(execucao) {
     resultado.hidden = false;
     mostrarEstado("Consulta concluída.", "success");
   } else if (execucao.status === "SEM_RESULTADO") {
-    mostrarEstado("O BCB não retornou dados para os parâmetros informados.", "warning");
+    mostrarEstado("Nenhum dado foi encontrado para os filtros selecionados.", "warning");
   } else if (execucao.status === "PROCESSANDO") {
     mostrarEstado("Esta consulta já está em processamento. Atualize o histórico para acompanhar.", "info");
   } else {
@@ -153,17 +162,15 @@ form.addEventListener("submit", async (event) => {
   button.disabled = true;
   form.setAttribute("aria-busy", "true");
   resultado.hidden = true;
-  mostrarEstado("Consultando Banco Central...", "info");
+  mostrarEstado("Consultando dados do Banco Central...", "info");
   try {
     const periodo = document.getElementById("periodo").value;
     const segmento = document.getElementById("segmento").value;
-    const uf = document.getElementById("uf").value;
     const execucao = await lerResposta(await fetch("/api/consultas/mercado", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({
-        administradora: document.getElementById("administradora").value,
-        periodo: periodo || null, segmento: segmento || null, uf: uf || null,
+        periodo: periodo || null, segmento,
       }),
     }));
     if (execucao.duplicada_de) {

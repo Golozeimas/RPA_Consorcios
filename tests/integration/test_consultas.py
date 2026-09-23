@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import create_engine
 
 from app.core.config import Settings
-from app.domain import Consulta, ConsorcioResultado, DATASET, DadosInvalidosError, FONTE, METRICA, NavegacaoError, PersistenciaError, Resultado, Status
+from app.domain import Consulta, DATASET, DadosInvalidosError, FONTE, METRICA, NavegacaoError, PanoramaResultado, PersistenciaError, Resultado, Status
 from app.main import create_app
 from app.models.execucao import Base
 from app.repositories.execucao_repository import SQLiteExecutionRepository
@@ -157,34 +157,36 @@ def test_consulta_mercado_gera_mensagem_e_preserva_historico(tmp_path):
 
         async def consultar(self, consulta):
             self.calls += 1
-            return ConsorcioResultado(
-                administradora=None, periodo_referencia="2026-06", grupos_ativos=16251,
-                cotas_ativas=13376260, cotas_contempladas=1855350,
-                cotas_comercializadas=5723740, creditos_comercializados=None,
-                segmento=None, uf=None, abrangencia="Brasil",
+            return PanoramaResultado(
+                segmento=consulta.segmento, periodo_referencia="2026-06",
+                cotas_ativas=5558340, credito_medio=Decimal("75950"),
+                prazo_medio=Decimal("90"), taxa_administracao_media=Decimal("15.16"),
+                contemplacoes=818740,
                 data_consulta=datetime.now(timezone.utc), fonte=FONTE,
                 source_url="https://olinda.bcb.gov.br/fixture",
-                campos_indisponiveis=["administradora", "creditos_comercializados"],
+                campos_indisponiveis=[],
             )
 
     settings = Settings(database_path=tmp_path / "mercado.sqlite3")
     gateway = FakeMercado()
     with TestClient(create_app(settings, mercado_gateway=gateway)) as client:
-        entrada = {"administradora": "ADMINISTRADORA INFORMADA", "periodo": None}
+        entrada = {"segmento": "Automóveis", "periodo": None}
         first = client.post("/api/consultas/mercado", json=entrada)
         assert first.status_code == 200
         primeiro = first.json()
         assert primeiro["status"] == "SUCESSO"
-        assert primeiro["dados_extraidos"]["administradora"] is None
-        assert primeiro["dados_extraidos"]["cotas_ativas"] == 13376260
-        assert "13.376.260" in primeiro["mensagem_gerada"]
-        assert "ADMINISTRADORA INFORMADA" not in primeiro["mensagem_gerada"]
+        assert "administradora" not in primeiro["dados_extraidos"]
+        assert primeiro["dados_extraidos"]["cotas_ativas"] == 5558340
+        assert "5.558.340" in primeiro["mensagem_gerada"]
         segundo = client.post("/api/consultas/mercado", json=entrada).json()
         assert segundo["status"] == "DUPLICADA"
         assert segundo["duplicada_de"] == primeiro["id"]
         assert gateway.calls == 1
         assert client.post("/api/consultas/mercado", json={
-            **entrada, "segmento": "Imóveis", "uf": "PI"
+            **entrada, "uf": "PI"
+        }).status_code == 422
+        assert client.post("/api/consultas/mercado", json={
+            **entrada, "administradora": "Nome incompatível"
         }).status_code == 422
     with TestClient(create_app(settings, mercado_gateway=gateway)) as client:
         restaurado = client.get(f"/api/consultas/{primeiro['id']}").json()

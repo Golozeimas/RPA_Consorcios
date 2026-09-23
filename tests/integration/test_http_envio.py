@@ -15,10 +15,16 @@ from app.main import create_app
 from app.repositories.envio_repository import SQLiteEnvioRepository
 
 
-# Estrutura e valor reais observados no BCB, métrica 10 / junho de 2026.
-BCB_PAYLOAD = {"value": [{"DataBase": 202606, "IdMetrica": "10", "Grupo": "Cotas ativas",
-                         "Metrica": "Cotas ativas - Total", "Valor": 13376.26, "Unidade": "mil"}]}
-ENTRADA = {"administradora": "Consulta de demonstração", "periodo": "2026-06"}
+# Recorte real da resposta BCB de junho/2026 para os segmentos do teste.
+BCB_PAYLOAD = {"value": [
+    {"DataBase": 202606, "IdMetrica": "13", "Grupo": "Cotas ativas", "Metrica": "Cotas ativas - Automóveis", "Valor": 5558.34, "Unidade": "mil"},
+    {"DataBase": 202606, "IdMetrica": "88", "Grupo": "Valor Médio", "Metrica": "Valor Médio dos Créditos dos grupos constituídos nos últimos 12 meses - Automóveis", "Valor": 75.95, "Unidade": "R$ mil"},
+    {"DataBase": 202606, "IdMetrica": "95", "Grupo": "Prazo Médio", "Metrica": "Prazo médio dos grupos constituídos nos últimos 12 meses - Automóveis", "Valor": 90.0, "Unidade": "meses"},
+    {"DataBase": 202606, "IdMetrica": "81", "Grupo": "Taxa de Administração", "Metrica": "Taxa Média Adm. dos grupos constituídos nos últimos 12 meses - Automóveis", "Valor": 15.16, "Unidade": "%"},
+    {"DataBase": 202606, "IdMetrica": "34", "Grupo": "Ativos Contemplados", "Metrica": "Cotas ativas contempladas nos últimos 12 meses - Automóveis", "Valor": 818.74, "Unidade": "mil"},
+    {"DataBase": 202606, "IdMetrica": "11", "Grupo": "Cotas ativas", "Metrica": "Cotas ativas - Imóveis", "Valor": 3202.55, "Unidade": "mil"},
+]}
+ENTRADA = {"segmento": "Automóveis", "periodo": "2026-06"}
 DESTINO = {"destinatario": "+1 (555) 000-0001"}
 
 
@@ -42,7 +48,7 @@ def test_fluxo_http_validacao_mensagem_envio_historico_e_duplicidade(tmp_path):
         assert request.url == "https://graph.facebook.com/v23.0/123/messages"
         payload = json.loads(request.content)
         assert payload["to"] == "15550000001"
-        assert "13.376.260" in payload["text"]["body"]
+        assert "5.558.340" in payload["text"]["body"]
         assert payload["messaging_product"] == "whatsapp"
         return httpx.Response(200, json={"messages": [{"id": "wamid.fixture"}]})
 
@@ -129,7 +135,7 @@ def test_reserva_simultanea_e_nova_execucao_legitima(tmp_path):
         lambda request: httpx.Response(200, json=BCB_PAYLOAD)
     ))) as client:
         primeiro = client.post("/api/consultas/mercado", json=ENTRADA).json()
-        segundo = client.post("/api/consultas/mercado", json={**ENTRADA, "administradora": "Outra solicitação"}).json()
+        segundo = client.post("/api/consultas/mercado", json={**ENTRADA, "segmento": "Imóveis"}).json()
         engine = create_engine(f"sqlite:///{config.database_path}")
         try:
             repository = SQLiteEnvioRepository(engine)
@@ -216,10 +222,10 @@ def test_interface_consulta_preview_envio_e_historico(tmp_path):
 
                 page.route("**/*", route_handler)
                 page.goto("http://testserver/")
-                page.get_by_label("Administradora solicitada").fill("Consulta de demonstração")
+                page.get_by_label("Tipo de consórcio").select_option("Automóveis")
                 page.get_by_label("Período", exact=True).fill("2026-06")
-                page.get_by_role("button", name="Executar consulta").click()
-                expect(page.locator("#mensagem")).to_contain_text("13.376.260")
+                page.get_by_role("button", name="Consultar Banco Central").click()
+                expect(page.locator("#mensagem")).to_contain_text("5.558.340")
                 assert not enviados
                 page.get_by_label("WhatsApp do destinatário").fill("+1 (555) 000-0001")
                 page.get_by_role("button", name="Enviar WhatsApp").click()

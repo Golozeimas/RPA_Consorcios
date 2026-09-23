@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from app.domain import Consulta, ConsultaMercado, DATASET, EnvioError, FONTE, METRICA, SEGMENTOS_BCB, UFS_BCB
+from app.domain import Consulta, ConsultaMercado, DATASET, EnvioError, FONTE, METRICA, SEGMENTOS_BCB
 from app.schemas.consulta import ConsultaInput, ExecucaoResponse
 from app.schemas.consorcios import ConsultaMercadoInput
 from app.services.consulta_service import ConsultaService
@@ -20,7 +20,7 @@ def criar_router(service: ConsultaService, mercado_service: ConsultaService, env
     async def inicio(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(request=request, name="consulta.html", context={
             "fonte": FONTE, "dataset": DATASET, "metrica": METRICA,
-            "segmentos": SEGMENTOS_BCB, "ufs": sorted(UFS_BCB),
+            "segmentos": SEGMENTOS_BCB,
         })
 
     @router.post("/api/consultas", response_model=ExecucaoResponse)
