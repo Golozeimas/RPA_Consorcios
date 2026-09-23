@@ -1,0 +1,282 @@
+
+# ============================================================
+# ------------------------------------------------------------
+# 1. SEGREDOS E VARIÁVEIS DE AMBIENTE
+# ------------------------------------------------------------
+
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+
+*.env
+*.secret
+*.secrets
+*.credentials
+credentials.*
+secrets.*
+secret.*
+
+# Tokens / chaves / certificados
+*.pem
+*.key
+*.p8
+*.p12
+*.pfx
+*.crt
+*.cer
+*.der
+*.jks
+*.keystore
+
+# Arquivos comuns de credenciais
+credentials.json
+client_secret*.json
+service-account*.json
+service_account*.json
+google-credentials*.json
+firebase-adminsdk*.json
+firebase-service-account*.json
+auth.json
+token.json
+tokens.json
+
+# ------------------------------------------------------------
+# 2. WHATSAPP / APIs / SESSÕES AUTENTICADAS
+# ------------------------------------------------------------
+
+whatsapp_credentials*
+whatsapp_token*
+access_token*
+refresh_token*
+api_key*
+api_keys*
+private_key*
+
+# Estado autenticado de navegador / Playwright
+auth/
+.auth/
+storage-state.json
+storage_state.json
+playwright/.auth/
+playwright-auth/
+browser-profile/
+browser_profiles/
+user-data-dir/
+user_data_dir/
+
+# Cookies, sessões e dados locais
+cookies.json
+cookies.txt
+session.json
+sessions/
+*.session
+
+# ------------------------------------------------------------
+# 3. ARQUIVOS DE IA / AGENTES
+# ------------------------------------------------------------
+
+AGENTS.md
+AGENT.md
+CLAUDE.md
+GEMINI.md
+COPILOT.md
+AI.md
+PROMPTS.md
+
+agents/
+.agent/
+.ai/
+.prompts/
+prompts/
+
+# Configurações e instruções locais de assistentes
+.cursor/
+.claude/
+.gemini/
+.copilot/
+.codex/
+.windsurf/
+.aider*
+.continue/
+
+# Variações comuns de documentos gerados para agentes
+*_AGENT.md
+*_AGENTS.md
+*_PROMPT.md
+*_PROMPTS.md
+ai-notes.md
+ai_notes.md
+ai-instructions.md
+ai_instructions.md
+
+# ------------------------------------------------------------
+# 4. PYTHON
+# ------------------------------------------------------------
+
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.python-version
+
+# Ambientes virtuais
+.venv/
+venv/
+env/
+ENV/
+venv.bak/
+env.bak/
+
+# Build / distribuição
+build/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ------------------------------------------------------------
+# 5. TESTES / QUALIDADE / COBERTURA
+# ------------------------------------------------------------
+
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.mypy_cache/
+.pyright/
+.pytype/
+.ruff_cache/
+
+# ------------------------------------------------------------
+# 6. BANCO DE DADOS / DADOS LOCAIS
+# Evita publicar histórico, destinatários, mensagens ou consultas.
+# ------------------------------------------------------------
+
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+
+database/
+data/
+local_data/
+runtime_data/
+storage/
+
+# Dumps / exports potencialmente sensíveis
+*.sql
+*.dump
+*.bak
+*.backup
+*.csv
+*.tsv
+*.xlsx
+*.xls
+
+# ------------------------------------------------------------
+# 7. LOGS / RASTREABILIDADE LOCAL
+# ------------------------------------------------------------
+
+*.log
+logs/
+log/
+debug.log
+error.log
+audit.log
+
+# ------------------------------------------------------------
+# 8. RPA / PLAYWRIGHT / ARTEFATOS DE EXECUÇÃO
+# ------------------------------------------------------------
+
+playwright-report/
+test-results/
+blob-report/
+traces/
+trace.zip
+
+screenshots/
+videos/
+recordings/
+downloads/
+artifacts/
+output/
+outputs/
+
+# Snapshots ou páginas capturadas durante scraping/RPA
+*.har
+*.mhtml
+*.html.tmp
+
+# ------------------------------------------------------------
+# 9. ARQUIVOS TEMPORÁRIOS / CACHE
+# ------------------------------------------------------------
+
+.cache/
+tmp/
+temp/
+*.tmp
+*.temp
+*.swp
+*.swo
+*.bak
+*.orig
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ------------------------------------------------------------
+# 10. IDEs / EDITORES
+# ------------------------------------------------------------
+
+.idea/
+.vscode/
+*.code-workspace
+
+# Se futuramente quiser versionar configurações compartilhadas
+# do VS Code, remova ".vscode/" e libere apenas os arquivos desejados.
+
+# ------------------------------------------------------------
+# 11. SISTEMA / FERRAMENTAS
+# ------------------------------------------------------------
+
+.ipynb_checkpoints/
+.history/
+.local/
+.direnv/
+.envrc
+
+# ------------------------------------------------------------
+# 12. ARQUIVOS DE PRODUÇÃO / INFRA LOCAL COM SEGREDOS
+# ------------------------------------------------------------
+
+docker-compose.override.yml
+compose.override.yml
+
+# Arquivos SSH
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+known_hosts
+
