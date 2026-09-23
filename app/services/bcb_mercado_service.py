@@ -1,11 +1,11 @@
 """Mapeamento do catálogo oficial PANORAMA_DE_CONSORCIOS, versão v1."""
 
 from dataclasses import dataclass
+from collections.abc import Callable
 from datetime import date, datetime, timezone
 from decimal import Decimal
 import json
 import logging
-from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
 
@@ -154,14 +154,15 @@ def normalizar_agregado(
 
 
 class BCBMercadoService:
-    def __init__(self, rpa: MetricasBCBGateway) -> None:
-        self.rpa = rpa
+    def __init__(self, collector: MetricasBCBGateway, hoje: Callable[[], date] | None = None) -> None:
+        self.collector = collector
+        self.hoje = hoje or (lambda: datetime.now(timezone.utc).date())
 
     async def consultar(self, consulta: ConsultaMercado) -> ConsorcioResultado | None:
-        hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+        hoje = self.hoje()
         periodos = [consulta.periodo] if consulta.periodo else periodos_candidatos(hoje)
         for periodo in periodos:
-            resposta = await self.rpa.extrair_periodo(periodo)
+            resposta = await self.collector.extrair_periodo(periodo)
             resultado = normalizar_agregado(resposta, consulta, periodo)
             if resultado is not None:
                 logger.info("bcb_metricas_normalizadas periodo=%s campos=%s", resultado.periodo_referencia, len(QUANTIDADES) - len([c for c in QUANTIDADES if c in resultado.campos_indisponiveis]))

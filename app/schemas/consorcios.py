@@ -1,8 +1,7 @@
-from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 from app.domain import ConsultaMercado
 
@@ -39,8 +38,3 @@ class ConsorcioConsultaResult(BaseModel):
     fonte: Literal["Banco Central do Brasil"]
     source_url: str = Field(min_length=1)
     campos_indisponiveis: list[str]
-
-    @field_validator("data_consulta")
-    @classmethod
-    def validar_data(cls, value: datetime) -> datetime:
-        return value

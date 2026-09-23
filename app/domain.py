@@ -1,5 +1,7 @@
 """Conceitos independentes de navegador, HTTP e persistência."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -51,6 +53,40 @@ class PersistenciaError(ConsultaError):
     pass
 
 
+class EnvioError(ConsultaError):
+    pass
+
+
+class EnvioIncertoError(EnvioError):
+    """O provedor pode ter aceitado; não repetir automaticamente."""
+
+
+class StatusEnvio(StrEnum):
+    ENVIANDO = "ENVIANDO"
+    ACEITO = "ACEITO"
+    ERRO = "ERRO"
+    INCERTO = "INCERTO"
+
+
+def normalizar_destinatario(valor: str) -> str:
+    telefone = re.sub(r"[\s()+-]", "", valor)
+    if not re.fullmatch(r"[1-9][0-9]{7,14}", telefone):
+        raise ValueError("Informe o telefone internacional com DDI, de 8 a 15 dígitos.")
+    return telefone
+
+
+@dataclass(frozen=True)
+class Envio:
+    id: str
+    execucao_id: str
+    destinatario: str
+    mensagem: str
+    status: StatusEnvio
+    data_hora: datetime
+    provedor_id: str | None = None
+    erro: str | None = None
+
+
 @dataclass(frozen=True)
 class Consulta:
     periodo: str
@@ -95,7 +131,7 @@ class Execucao:
     data_hora: datetime
     status: Status
     hash_consulta: str
-    dados_extraidos: Resultado | "ConsorcioResultado" | None = None
+    dados_extraidos: Resultado | ConsorcioResultado | None = None
     erro: str | None = None
     duplicada_de: str | None = None
     mensagem_gerada: str | None = None

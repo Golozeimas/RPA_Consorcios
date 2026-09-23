@@ -39,6 +39,7 @@ def _resultado_json(
         "periodo": resultado.periodo, "metrica": resultado.metrica,
         "valor": str(resultado.valor), "unidade": resultado.unidade,
         "consultado_em": resultado.consultado_em.isoformat(),
+        "_mensagem_gerada": mensagem_gerada,
     }
 
 
@@ -47,8 +48,8 @@ def _entidade(model: ExecucaoModel) -> Execucao:
     mensagem_gerada = None
     if model.dados_extraidos is not None:
         registro = model.dados_extraidos
+        mensagem_gerada = registro.get("_mensagem_gerada")
         if "periodo_referencia" in registro:
-            mensagem_gerada = registro.get("_mensagem_gerada")
             resultado = ConsorcioResultado(
                 administradora=registro["administradora"],
                 periodo_referencia=registro["periodo_referencia"],

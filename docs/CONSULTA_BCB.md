@@ -1,5 +1,24 @@
 # Consulta BCB selecionada
 
+## Integração atual: HTTP/OData
+
+O Swagger oficial foi revalidado em 23/09/2026:
+https://olinda.bcb.gov.br/olinda/servico/PANORAMA_DE_CONSORCIOS/versao/v1/swagger-ui3#/
+
+O documento embutido declara basePath
+`/olinda/servico/PANORAMA_DE_CONSORCIOS/versao/v1/odata` e os recursos
+`GrupoDeMetricas()`, `CadastroDeMetricas()` e `Metricas(DataBase=@DataBase)`.
+O último exige `@DataBase` inteiro; `$format`, `$top`, `$skip`, `$filter` e
+`$orderby` são opcionais. O cliente atual usa `@DataBase`, `$format=json` e
+`$top=200`, sem filtros por campos não suportados. Seleção de métricas ocorre
+no parser validado. Nomes e tipos de resposta continuam iguais ao mapeamento abaixo.
+
+Ambas as rotas da aplicação agora usam HTTP via `BCBClient`, sem navegador no
+caminho da consulta. O Playwright anterior permanece disponível e testado, mas
+não é instanciado pela aplicação. A investigação de DOM abaixo é histórica.
+
+## Investigação original do navegador
+
 Inspeção em 23/09/2026, antes da implementação, usando Chromium/Playwright.
 
 - Dataset: Dados Agregados do Segmento de Consórcios.
@@ -22,8 +41,8 @@ retornou 125 registros; a métrica 10 tinha Valor `12821.11`, Unidade `mil`.
 mas será rejeitado pela aplicação como mês inválido.
 
 A interface é Angular e carrega os resultados de forma assíncrona após **Executar**.
-O formulário gera a URL OData; a aplicação implementada não fará HTTP direto.
-O RPA aguarda a resposta disparada pelo clique, abre a aba JSON e lê `pre.dados`
+O formulário gera a URL OData. O adaptador de navegador original
+aguarda a resposta disparada pelo clique, abre a aba JSON e lê `pre.dados`
 no DOM. A grade é virtualizada, portanto extrair somente suas linhas visíveis
 perderia registros. A aba JSON contém o conjunto retornado.
 

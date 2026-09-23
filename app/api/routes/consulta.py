@@ -4,13 +4,15 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from app.domain import Consulta, ConsultaMercado, DATASET, FONTE, METRICA, SEGMENTOS_BCB, UFS_BCB
+from app.domain import Consulta, ConsultaMercado, DATASET, EnvioError, FONTE, METRICA, SEGMENTOS_BCB, UFS_BCB
 from app.schemas.consulta import ConsultaInput, ExecucaoResponse
 from app.schemas.consorcios import ConsultaMercadoInput
 from app.services.consulta_service import ConsultaService
+from app.services.envio_service import EnvioService
+from app.schemas.envio import EnvioInput, EnvioResponse
 
 
-def criar_router(service: ConsultaService, mercado_service: ConsultaService) -> APIRouter:
+def criar_router(service: ConsultaService, mercado_service: ConsultaService, envio_service: EnvioService) -> APIRouter:
     router = APIRouter()
     templates = Jinja2Templates(directory=Path(__file__).resolve().parents[2] / "templates")
 
@@ -40,5 +42,16 @@ def criar_router(service: ConsultaService, mercado_service: ConsultaService) -> 
         if execucao is None:
             raise HTTPException(404, "Execução não encontrada.")
         return ExecucaoResponse.model_validate(execucao)
+
+    @router.post("/api/consultas/{id}/envios", response_model=EnvioResponse)
+    async def enviar(id: str, entrada: EnvioInput) -> EnvioResponse:
+        try:
+            return EnvioResponse.model_validate(await envio_service.enviar(id, entrada.destinatario))
+        except EnvioError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @router.get("/api/consultas/{id}/envios", response_model=list[EnvioResponse])
+    async def envios(id: str) -> list[EnvioResponse]:
+        return [EnvioResponse.model_validate(item) for item in envio_service.listar(id)]
 
     return router

@@ -4,6 +4,32 @@ const form = document.getElementById("consulta-form");
 const button = document.getElementById("executar");
 const estado = document.getElementById("estado");
 const resultado = document.getElementById("resultado");
+const envioForm = document.getElementById("envio-form");
+const enviarButton = document.getElementById("enviar");
+let execucaoAtual = null;
+
+const estadosEnvio = {
+  ACEITO: "Mensagem aceita pelo WhatsApp. A entrega ao destinatário ainda não foi confirmada.",
+  ENVIANDO: "Envio em processamento ou aguardando confirmação. Não repita o envio.",
+  INCERTO: "Resultado incerto. Verifique no provedor antes de tentar outro envio.",
+  ERRO: "Falha no envio.",
+};
+
+async function atualizarEnvios(id) {
+  try {
+    const envios = await lerResposta(await fetch(`/api/consultas/${encodeURIComponent(id)}/envios`));
+    if (execucaoAtual !== id) return;
+    const lista = document.getElementById("envio-historico");
+    lista.replaceChildren();
+    for (const envio of envios) {
+      const item = document.createElement("li");
+      item.textContent = `${new Date(envio.data_hora).toLocaleString("pt-BR")} — ***${envio.destinatario.slice(-4)} — ${envio.erro || estadosEnvio[envio.status]}`;
+      lista.append(item);
+    }
+  } catch {
+    if (execucaoAtual === id) document.getElementById("envio-estado").textContent = "Não foi possível carregar o histórico de envios.";
+  }
+}
 
 function mostrarEstado(mensagem, estilo) {
   estado.textContent = mensagem;
@@ -14,25 +40,72 @@ function mostrarEstado(mensagem, estilo) {
 async function lerResposta(response) {
   const payload = await response.json();
   if (!response.ok) {
-    throw new Error(typeof payload.detail === "string" ? payload.detail : "Informe um período válido no formato ano-mês.");
+    throw new Error(typeof payload.detail === "string" ? payload.detail : "Informe parâmetros válidos.");
   }
   return payload;
 }
 
+function campo(label, valor) {
+  const lista = document.getElementById("resultado-campos");
+  const titulo = document.createElement("dt");
+  titulo.textContent = label;
+  const conteudo = document.createElement("dd");
+  conteudo.textContent = valor ?? "Não disponível";
+  lista.append(titulo, conteudo);
+}
+
+function numero(valor) {
+  return valor === null ? "Não disponível" : Number(valor).toLocaleString("pt-BR");
+}
+
 function mostrarExecucao(execucao) {
+  execucaoAtual = execucao.id;
+  envioForm.hidden = true;
+  document.getElementById("envio-estado").textContent = "";
+  document.getElementById("envio-historico").replaceChildren();
   resultado.hidden = true;
+  document.getElementById("resultado-campos").replaceChildren();
+  const mensagem = document.getElementById("mensagem");
+  mensagem.hidden = true;
+  document.getElementById("mensagem-titulo").hidden = true;
   if (execucao.status === "SUCESSO" && execucao.dados_extraidos) {
     const item = execucao.dados_extraidos;
-    document.getElementById("resultado-fonte").textContent = item.fonte;
-    document.getElementById("resultado-metrica").textContent = item.metrica;
-    document.getElementById("resultado-periodo").textContent = item.periodo;
-    document.getElementById("resultado-valor").textContent = `${Number(item.valor).toLocaleString("pt-BR", {maximumFractionDigits: 10})} ${item.unidade}`;
-    document.getElementById("resultado-data").textContent = new Date(item.consultado_em).toLocaleString("pt-BR");
-    document.getElementById("resultado-id").textContent = execucao.id;
+    campo("Fonte", item.fonte);
+    if ("periodo_referencia" in item) {
+      campo("Administradora", item.administradora ?? "Não disponível no conjunto agregado");
+      campo("Período de referência", item.periodo_referencia);
+      campo("Abrangência", item.abrangencia);
+      if (item.segmento) campo("Segmento", item.segmento);
+      campo("Grupos ativos", numero(item.grupos_ativos));
+      campo("Cotas ativas", numero(item.cotas_ativas));
+      campo("Cotas contempladas (últimos 12 meses)", numero(item.cotas_contempladas));
+      campo("Cotas comercializadas (últimos 12 meses)", numero(item.cotas_comercializadas));
+      campo("Créditos comercializados", item.creditos_comercializados ?? "Não disponível");
+      campo("Campos indisponíveis", item.campos_indisponiveis.join(", "));
+      campo("Consultado em", new Date(item.data_consulta).toLocaleString("pt-BR"));
+      if (execucao.mensagem_gerada) {
+        mensagem.textContent = execucao.mensagem_gerada;
+        mensagem.hidden = false;
+        document.getElementById("mensagem-titulo").hidden = false;
+      }
+    } else {
+      campo("Métrica", item.metrica);
+      campo("Período", item.periodo);
+      campo("Resultado", `${Number(item.valor).toLocaleString("pt-BR")} ${item.unidade}`);
+      campo("Consultado em", new Date(item.consultado_em).toLocaleString("pt-BR"));
+    }
+    campo("Execução", execucao.id);
+    if (execucao.mensagem_gerada) {
+      mensagem.textContent = execucao.mensagem_gerada;
+      mensagem.hidden = false;
+      document.getElementById("mensagem-titulo").hidden = false;
+      envioForm.hidden = false;
+    }
+    atualizarEnvios(execucao.id);
     resultado.hidden = false;
     mostrarEstado("Consulta concluída.", "success");
   } else if (execucao.status === "SEM_RESULTADO") {
-    mostrarEstado("O BCB não retornou essa métrica para o período informado.", "warning");
+    mostrarEstado("O BCB não retornou dados para os parâmetros informados.", "warning");
   } else if (execucao.status === "PROCESSANDO") {
     mostrarEstado("Esta consulta já está em processamento. Atualize o histórico para acompanhar.", "info");
   } else {
@@ -82,10 +155,16 @@ form.addEventListener("submit", async (event) => {
   resultado.hidden = true;
   mostrarEstado("Consultando Banco Central...", "info");
   try {
-    const execucao = await lerResposta(await fetch("/api/consultas", {
+    const periodo = document.getElementById("periodo").value;
+    const segmento = document.getElementById("segmento").value;
+    const uf = document.getElementById("uf").value;
+    const execucao = await lerResposta(await fetch("/api/consultas/mercado", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({periodo: document.getElementById("periodo").value}),
+      body: JSON.stringify({
+        administradora: document.getElementById("administradora").value,
+        periodo: periodo || null, segmento: segmento || null, uf: uf || null,
+      }),
     }));
     if (execucao.duplicada_de) {
       await carregarExecucao(execucao.duplicada_de);
@@ -102,4 +181,27 @@ form.addEventListener("submit", async (event) => {
 });
 
 document.getElementById("atualizar").addEventListener("click", atualizarHistorico);
+envioForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!execucaoAtual || enviarButton.disabled) return;
+  const id = execucaoAtual;
+  enviarButton.disabled = true;
+  envioForm.setAttribute("aria-busy", "true");
+  const aviso = document.getElementById("envio-estado");
+  aviso.textContent = "Enviando WhatsApp...";
+  try {
+    const envio = await lerResposta(await fetch(`/api/consultas/${encodeURIComponent(id)}/envios`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({destinatario: document.getElementById("destinatario").value}),
+    }));
+    if (execucaoAtual === id) aviso.textContent = envio.erro || estadosEnvio[envio.status];
+  } catch (error) {
+    if (execucaoAtual === id) aviso.textContent = error instanceof TypeError
+      ? "Falha de conexão. Consulte o histórico antes de tentar novamente." : error.message;
+  } finally {
+    enviarButton.disabled = false;
+    envioForm.setAttribute("aria-busy", "false");
+    await atualizarEnvios(id);
+  }
+});
 atualizarHistorico();

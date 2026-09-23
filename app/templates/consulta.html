@@ -18,7 +18,7 @@
     <p class="form-text">O conjunto do BCB apresenta agregados do mercado, sem valores por administradora. O nome identifica sua solicitação e não filtra os números.</p>
     <label for="periodo" class="form-label">Período</label>
     <input id="periodo" name="periodo" type="month" class="form-control" aria-describedby="periodo-ajuda">
-    <p id="periodo-ajuda" class="form-text">Opcional. Em branco, o RPA encontra o período trimestral mais recente publicado pelo BCB.</p>
+    <p id="periodo-ajuda" class="form-text">Opcional. Em branco, a consulta encontra o período trimestral mais recente publicado pelo BCB.</p>
     <label for="segmento" class="form-label">Segmento</label>
     <select id="segmento" name="segmento" class="form-select mb-3">
       <option value="">Todos</option>
@@ -30,14 +30,22 @@
       {% for item in ufs %}<option value="{{ item }}">{{ item }}</option>{% endfor %}
     </select>
     <p class="form-text">UF oferece somente cotas ativas; o BCB não publica este conjunto por segmento e UF juntos.</p>
-    <button id="executar" type="submit" class="btn btn-primary align-self-start">Executar RPA</button>
+    <button id="executar" type="submit" class="btn btn-primary align-self-start">Executar consulta</button>
   </form>
   <section id="estado" class="alert" role="status" aria-live="polite" hidden></section>
   <section id="resultado" class="card card-body mb-4" hidden>
     <h2 class="h4">Consulta concluída</h2>
     <dl id="resultado-campos" class="mb-0"></dl>
     <h3 id="mensagem-titulo" class="h5 mt-3" hidden>Mensagem gerada</h3>
-    <pre id="mensagem" class="text-wrap" hidden></pre>
+    <pre id="mensagem" style="white-space: pre-wrap" hidden></pre>
+    <form id="envio-form" hidden>
+      <label for="destinatario" class="form-label">WhatsApp do destinatário (DDI + DDD + número)</label>
+      <input id="destinatario" type="tel" class="form-control" maxlength="30" required autocomplete="tel">
+      <p class="form-text">Envie a um destinatário que autorizou o contato e iniciou uma conversa nas últimas 24 horas.</p>
+      <button id="enviar" class="btn btn-success" type="submit">Enviar WhatsApp</button>
+    </form>
+    <p id="envio-estado" role="status" aria-live="polite" class="mt-3"></p>
+    <ul id="envio-historico" class="mb-0"></ul>
   </section>
   <section>
     <div class="d-flex align-items-center gap-3 mb-3">

@@ -49,3 +49,22 @@ def test_http_falha_na_consulta_nao_extrai_resultado():
 
     asyncio.run(run())
     page.locator.assert_any_call("#param0")
+
+
+def test_coletor_odata_fecha_browser_quando_navegacao_expira():
+    page = MagicMock()
+    page.goto = AsyncMock(side_effect=PlaywrightTimeout("timeout"))
+    context = MagicMock()
+    context.new_page = AsyncMock(return_value=page)
+    browser = MagicMock()
+    browser.new_context = AsyncMock(return_value=context)
+    browser.close = AsyncMock()
+    playwright = MagicMock()
+    playwright.chromium.launch = AsyncMock(return_value=browser)
+    manager = MagicMock()
+    manager.__aenter__ = AsyncMock(return_value=playwright)
+    manager.__aexit__ = AsyncMock(return_value=False)
+    with patch("app.automation.bcb_consorcios.async_playwright", return_value=manager):
+        with pytest.raises(NavegacaoError):
+            asyncio.run(BCBConsorciosRpa().extrair_periodo("2026-06"))
+    browser.close.assert_awaited_once()

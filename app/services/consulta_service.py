@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime, timezone
 import logging
 
-from app.domain import Consulta, ConsultaError, ConsultaMercado, ConsorcioResultado, Execucao, Status
+from app.domain import Consulta, ConsultaError, ConsultaMercado, Execucao, Status
 from app.services.mensagem_service import gerar_mensagem
 from app.services.ports import ExecutionRepository, PublicQueryGateway
 
@@ -19,7 +19,7 @@ class ConsultaService:
 
     async def executar(self, consulta: Consulta | ConsultaMercado) -> Execucao:
         execucao = self.repository.reservar(consulta, datetime.now(timezone.utc))
-        logger.info("consulta_inicio id=%s parametros=%s", execucao.id, consulta.parametros)
+        logger.info("consulta_inicio id=%s tipo=%s", execucao.id, execucao.tipo_consulta)
         if execucao.status == Status.DUPLICADA:
             logger.info("consulta_duplicada id=%s original=%s", execucao.id, execucao.duplicada_de)
             return execucao
@@ -30,7 +30,7 @@ class ConsultaService:
         try:
             async with asyncio.timeout(self.timeout_seconds):
                 resultado = await self.bcb.consultar(consulta)
-            if isinstance(resultado, ConsorcioResultado):
+            if resultado is not None:
                 mensagem_gerada = gerar_mensagem(resultado)
             status = Status.SUCESSO if resultado is not None else Status.SEM_RESULTADO
             logger.info("consulta_resultado id=%s status=%s", execucao.id, status)
