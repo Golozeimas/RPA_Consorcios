@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from app.domain import Envio, EnvioError, EnvioIncertoError, StatusEnvio, normalizar_destinatario
+from app.domain import Envio, EnvioError, EnvioIncertoError, StatusEnvio
 from app.services.ports import EnvioRepository, MessageGateway
 
 logger = logging.getLogger(__name__)
@@ -13,7 +13,8 @@ class EnvioService:
         self.repository = repository
 
     async def enviar(self, execucao_id: str, destinatario: str) -> Envio:
-        envio, reservado = self.repository.reservar_envio(execucao_id, normalizar_destinatario(destinatario))
+        """Recebe o telefone internacional já validado e normalizado na fronteira."""
+        envio, reservado = self.repository.reservar_envio(execucao_id, destinatario)
         if not reservado:
             logger.info("envio_duplicado_bloqueado id=%s", envio.id)
             return envio

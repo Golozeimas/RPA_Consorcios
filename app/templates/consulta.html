@@ -36,10 +36,17 @@
     <h3 id="mensagem-titulo" class="h5 mt-3" hidden>Mensagem gerada</h3>
     <pre id="mensagem" style="white-space: pre-wrap" hidden></pre>
     <form id="envio-form" hidden>
-      <label for="destinatario" class="form-label">WhatsApp do destinatário (DDI + DDD + número)</label>
-      <input id="destinatario" type="tel" class="form-control" maxlength="30" required autocomplete="tel">
-      <p class="form-text">Envie a um destinatário que autorizou o contato e iniciou uma conversa nas últimas 24 horas.</p>
-      <button id="enviar" class="btn btn-success" type="submit">Enviar WhatsApp</button>
+      <label for="destinatario" class="form-label">Telefone / WhatsApp do destinatário</label>
+      <input id="destinatario" type="tel" class="form-control" maxlength="30" required autocomplete="tel"
+             placeholder="+55 86 99999-9999" aria-describedby="telefone-ajuda telefone-validacao">
+      <p id="telefone-ajuda" class="form-text">Informe DDD e número. O código +55 é adicionado automaticamente para telefones brasileiros.</p>
+      <p id="telefone-validacao" role="status" aria-live="polite" class="form-text"></p>
+      {% if usa_template %}
+      <p class="form-text">Envio pelo modelo aprovado configurado, com os dados da mensagem acima. Envie somente a quem autorizou o contato.</p>
+      {% else %}
+      <p class="form-text">Envio de texto: o destinatário deve ter autorizado o contato e enviado uma mensagem nas últimas 24 horas. Fora dessa janela, configure um modelo aprovado no servidor.</p>
+      {% endif %}
+      <button id="enviar" class="btn btn-success" type="submit" disabled>Enviar WhatsApp</button>
     </form>
     <p id="envio-estado" role="status" aria-live="polite" class="mt-3"></p>
     <ul id="envio-historico" class="mb-0"></ul>

@@ -77,9 +77,23 @@ class StatusEnvio(StrEnum):
 
 
 def normalizar_destinatario(valor: str) -> str:
+    valor = valor.strip()
+    if not re.fullmatch(r"\+?[0-9\s()-]+", valor):
+        raise ValueError("Informe um número de WhatsApp válido.")
     telefone = re.sub(r"[\s()+-]", "", valor)
+    nacional = r"[1-9][0-9](?:9[0-9]{8}|[2-5][0-9]{7})"
+    if not valor.startswith("+") and re.fullmatch(nacional, telefone):
+        telefone = "55" + telefone
+    elif not valor.startswith("+") and len(telefone) in {10, 11}:
+        # Preserva números internacionais norte-americanos já normalizados.
+        if not (len(telefone) == 11 and telefone.startswith("1")):
+            raise ValueError("Informe um número de WhatsApp válido com DDD.")
+    if telefone.startswith("55") and not re.fullmatch("55" + nacional, telefone):
+        raise ValueError("Informe um número brasileiro válido com DDD.")
     if not re.fullmatch(r"[1-9][0-9]{7,14}", telefone):
-        raise ValueError("Informe o telefone internacional com DDI, de 8 a 15 dígitos.")
+        raise ValueError("Informe um número de WhatsApp válido.")
+    if not valor.startswith("+") and len(telefone) < 11:
+        raise ValueError("Informe o DDD e o número de WhatsApp.")
     return telefone
 
 

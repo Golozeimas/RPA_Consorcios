@@ -6,7 +6,46 @@ const estado = document.getElementById("estado");
 const resultado = document.getElementById("resultado");
 const envioForm = document.getElementById("envio-form");
 const enviarButton = document.getElementById("enviar");
+const telefoneInput = document.getElementById("destinatario");
+const enviosBloqueados = new Set();
+const enviosEmAndamento = new Set();
+const historicosCarregados = new Set();
 let execucaoAtual = null;
+
+function normalizarTelefone(valor) {
+  valor = valor.trim();
+  if (!/^\+?[0-9\s()-]+$/.test(valor)) return null;
+  let telefone = valor.replace(/[\s()+-]/g, "");
+  const nacional = /^[1-9][0-9](?:9[0-9]{8}|[2-5][0-9]{7})$/;
+  if (!valor.startsWith("+") && nacional.test(telefone)) {
+    telefone = `55${telefone}`;
+  } else if (!valor.startsWith("+") && [10, 11].includes(telefone.length)) {
+    if (!(telefone.length === 11 && telefone.startsWith("1"))) return null;
+  }
+  if (telefone.startsWith("55") && !nacional.test(telefone.slice(2))) return null;
+  if (!/^[1-9][0-9]{7,14}$/.test(telefone)) return null;
+  if (!valor.startsWith("+") && telefone.length < 11) return null;
+  return telefone;
+}
+
+function validarTelefone() {
+  const telefone = normalizarTelefone(telefoneInput.value);
+  const aviso = document.getElementById("telefone-validacao");
+  telefoneInput.setCustomValidity(telefone ? "" : "Informe um número de WhatsApp válido.");
+  telefoneInput.classList.toggle("is-valid", Boolean(telefone));
+  telefoneInput.classList.toggle("is-invalid", Boolean(telefoneInput.value) && !telefone);
+  aviso.textContent = telefone ? `Número válido: +${telefone}` : "Informe um número de WhatsApp válido.";
+  const bloqueado = enviosBloqueados.has(execucaoAtual) || enviosEmAndamento.has(execucaoAtual);
+  telefoneInput.disabled = bloqueado;
+  enviarButton.disabled = !telefone || bloqueado || !historicosCarregados.has(execucaoAtual);
+  return telefone;
+}
+
+telefoneInput.addEventListener("input", validarTelefone);
+telefoneInput.addEventListener("blur", () => {
+  const telefone = validarTelefone();
+  if (telefone) telefoneInput.value = telefone.startsWith("55") ? telefone : `+${telefone}`;
+});
 
 const estadosEnvio = {
   ACEITO: "Mensagem aceita pelo WhatsApp. A entrega ao destinatário ainda não foi confirmada.",
@@ -18,12 +57,15 @@ const estadosEnvio = {
 async function atualizarEnvios(id) {
   try {
     const envios = await lerResposta(await fetch(`/api/consultas/${encodeURIComponent(id)}/envios`));
+    historicosCarregados.add(id);
+    if (envios.length) enviosBloqueados.add(id);
     if (execucaoAtual !== id) return;
+    validarTelefone();
     const lista = document.getElementById("envio-historico");
     lista.replaceChildren();
     for (const envio of envios) {
       const item = document.createElement("li");
-      item.textContent = `${new Date(envio.data_hora).toLocaleString("pt-BR")} — ***${envio.destinatario.slice(-4)} — ${envio.erro || estadosEnvio[envio.status]}`;
+      item.textContent = `${new Date(envio.data_hora).toLocaleString("pt-BR")} — ***${envio.destinatario.slice(-4)} — ${envio.erro || estadosEnvio[envio.status]}${envio.provedor_id ? ` — ID: ${envio.provedor_id}` : ""}`;
       lista.append(item);
     }
   } catch {
@@ -60,6 +102,8 @@ function numero(valor) {
 
 function mostrarExecucao(execucao) {
   execucaoAtual = execucao.id;
+  envioForm.setAttribute("aria-busy", String(enviosEmAndamento.has(execucaoAtual)));
+  validarTelefone();
   envioForm.hidden = true;
   document.getElementById("envio-estado").textContent = "";
   document.getElementById("envio-historico").replaceChildren();
@@ -191,23 +235,32 @@ document.getElementById("atualizar").addEventListener("click", atualizarHistoric
 envioForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!execucaoAtual || enviarButton.disabled) return;
+  const telefone = validarTelefone();
+  if (!telefone) return;
   const id = execucaoAtual;
-  enviarButton.disabled = true;
+  telefoneInput.value = telefone.startsWith("55") ? telefone : `+${telefone}`;
+  enviosEmAndamento.add(id);
+  validarTelefone();
   envioForm.setAttribute("aria-busy", "true");
   const aviso = document.getElementById("envio-estado");
-  aviso.textContent = "Enviando WhatsApp...";
+  aviso.textContent = "Enviando mensagem...";
   try {
     const envio = await lerResposta(await fetch(`/api/consultas/${encodeURIComponent(id)}/envios`, {
       method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({destinatario: document.getElementById("destinatario").value}),
+      body: JSON.stringify({destinatario: telefoneInput.value}),
     }));
+    enviosBloqueados.add(id);
     if (execucaoAtual === id) aviso.textContent = envio.erro || estadosEnvio[envio.status];
   } catch (error) {
     if (execucaoAtual === id) aviso.textContent = error instanceof TypeError
       ? "Falha de conexão. Consulte o histórico antes de tentar novamente." : error.message;
   } finally {
-    enviarButton.disabled = false;
-    envioForm.setAttribute("aria-busy", "false");
+    enviosEmAndamento.delete(id);
+    historicosCarregados.delete(id);
+    if (execucaoAtual === id) {
+      envioForm.setAttribute("aria-busy", "false");
+      validarTelefone();
+    }
     await atualizarEnvios(id);
   }
 });

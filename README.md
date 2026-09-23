@@ -35,8 +35,10 @@ vazios usam os padrões abaixo:
 | WHATSAPP_ACCESS_TOKEN | vazio (envio desabilitado até configurar) |
 | WHATSAPP_PHONE_NUMBER_ID | vazio |
 | WHATSAPP_API_VERSION | vazio; informe uma versão Graph API suportada, no formato vNN.0 |
+| WHATSAPP_TEMPLATE_NAME | vazio preserva o envio de texto; preenchido seleciona template aprovado |
+| WHATSAPP_TEMPLATE_LANGUAGE | pt_BR; deve corresponder ao idioma aprovado do template |
 
-As três variáveis `WHATSAPP_*` devem ser configuradas juntas em `.env`. Nunca
+Token, Phone Number ID e versão da API devem ser configurados juntos em `.env`. Nunca
 versione esse arquivo. Configuração parcial/ inválida impede a inicialização.
 As variáveis `BROWSER_*` são usadas somente pelo adaptador de navegador legado.
 Bootstrap 5 é carregado por CDN; o formulário e o JavaScript local não dependem
@@ -113,21 +115,40 @@ novas tentativas; nesse caso o log é a evidência disponível.
 
 ## Enviar WhatsApp
 
-Após consultar, confira os dados e a mensagem. Informe o telefone internacional
-com DDI e clique **Enviar WhatsApp**. A aplicação envia o texto salvo, não um
+Após consultar, confira os dados e a mensagem. Informe o telefone com DDD e
+clique **Enviar WhatsApp**. Entradas como `(86) 99999-9999`, `86 99999-9999`
+e `+55 86 99999-9999` são normalizadas para `5586999999999`, na tela e no backend.
+A validação é de formato; somente o provedor pode confirmar que há uma conta
+WhatsApp disponível nesse número. O botão fica bloqueado com telefone inválido,
+durante o envio e quando já existe uma tentativa para a execução.
+A aplicação envia a mensagem salva, não um
 texto arbitrário recebido do navegador. A consulta nunca dispara envio sozinha.
 O destinatário deve autorizar o contato e ter iniciado uma conversa nas últimas
 24 horas, conforme a [documentação da Meta](https://whatsapp.github.io/WhatsApp-Nodejs-SDK/).
-Envios fora dessa janela exigem templates aprovados, fora deste fluxo de texto.
+Envios fora dessa janela exigem templates aprovados. Configure
+`WHATSAPP_TEMPLATE_NAME` e `WHATSAPP_TEMPLATE_LANGUAGE` para habilitar esse modo.
+O adaptador suporta um template previamente aprovado com **um parâmetro posicional
+de texto no corpo (`{{1}}`)**, sem parâmetros em cabeçalho/botões. Esse parâmetro
+recebe a mensagem gerada, com espaços normalizados para uma única linha e limite
+de 1024 caracteres (mensagens maiores falham sem envio, nunca são truncadas).
+O texto fixo e a aprovação do modelo são administrados na Meta; o template deve
+ser compatível com esse contrato. O aplicativo não cria nem aprova templates.
+Referência: [envio de templates na documentação da Meta](https://whatsapp.github.io/WhatsApp-Nodejs-SDK/api-reference/messages/template/).
+Não há fallback de template para texto em caso de falha. A tela informa a modalidade
+configurada; no modo texto, o operador deve verificar a janela de atendimento,
+pois este MVP não recebe webhooks de mensagens de entrada.
 
-`POST /api/consultas/{id}/envios` recebe `{"destinatario":"<telefone internacional>"}`.
+`POST /api/consultas/{id}/envios` recebe `{"destinatario":"(86) 99999-9999"}`.
+O ID da execução identifica a mensagem persistida; não é necessário reenviá-la
+pelo navegador. As credenciais e a requisição à Meta ficam somente no servidor.
 `GET /api/consultas/{id}/envios` exibe o histórico, também acessível pelos detalhes
 da consulta na tela. A tabela adicional `envios` é criada sem alterar ou apagar
 as consultas existentes. Guarda destinatário, mensagem, datas, status, ID da Meta,
 erro e contador de tentativas repetidas.
 
-Uma reserva transacional e unicidade `(execucao_id, destinatario)` impedem envios
-concorrentes/repetidos, inclusive após reiniciar o servidor. A mesma operação
+Uma reserva transacional por execução, além da unicidade existente
+`(execucao_id, destinatario)`, impede envios concorrentes/repetidos, inclusive após
+reiniciar o servidor ou trocar o telefone. A mesma operação
 retorna seu registro anterior, mesmo em caso de erro. Uma nova consulta deliberada
 pode originar um novo envio; a janela de duplicidade da consulta continua valendo.
 Não há retries automáticos. Para corrigir falhas definitivas, ajuste a configuração

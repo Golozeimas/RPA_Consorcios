@@ -1,6 +1,7 @@
 """Fronteiras HTTP simuladas; nunca envia mensagens reais."""
 
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 import json
 import os
 
@@ -65,6 +66,7 @@ def test_fluxo_http_validacao_mensagem_envio_historico_e_duplicidade(tmp_path):
         assert envio["provedor_id"] == "wamid.fixture"
         assert envio["mensagem"] == consulta["mensagem_gerada"]
         assert client.post(rota, json={"destinatario": "15550000001"}).json() == envio
+        assert client.post(rota, json={"destinatario": "(86) 99999-9999"}).json() == envio
         assert len(requests) == 2
         assert client.get(rota).json() == [envio]
         assert client.post(rota, json={"destinatario": "inválido"}).status_code == 422
@@ -92,7 +94,8 @@ def test_subsegmento_oficial_na_tela_e_na_consulta(tmp_path):
 
 @pytest.mark.parametrize("cenario,status", [
     ("timeout", "INCERTO"), ("connection", "INCERTO"), ("500", "INCERTO"),
-    ("400", "ERRO"), ("429", "ERRO"), ("invalid-json", "INCERTO"), ("invalid-schema", "INCERTO"),
+    ("400", "ERRO"), ("401", "ERRO"), ("403", "ERRO"), ("429", "ERRO"),
+    ("invalid-json", "INCERTO"), ("invalid-schema", "INCERTO"),
 ])
 def test_falhas_whatsapp_persistidas_sem_reenvio(tmp_path, cenario, status):
     chamadas = []
@@ -158,7 +161,8 @@ def test_reserva_simultanea_e_nova_execucao_legitima(tmp_path):
         try:
             repository = SQLiteEnvioRepository(engine)
             with ThreadPoolExecutor(max_workers=2) as pool:
-                reservas = list(pool.map(lambda _: repository.reservar_envio(primeiro["id"], "15550000001"), range(2)))
+                reservas = list(pool.map(lambda telefone: repository.reservar_envio(primeiro["id"], telefone),
+                                         ["15550000001", "5586999999999"]))
             assert sorted(novo for _, novo in reservas) == [False, True]
             assert reservas[0][0].id == reservas[1][0].id
             assert repository.reservar_envio(segundo["id"], "15550000001")[1]
@@ -245,12 +249,53 @@ def test_interface_consulta_preview_envio_e_historico(tmp_path):
                 page.get_by_role("button", name="Consultar Banco Central").click()
                 expect(page.locator("#mensagem")).to_contain_text("5.558.340")
                 assert not enviados
-                page.get_by_label("WhatsApp do destinatário").fill("+1 (555) 000-0001")
+                expect(page.get_by_role("button", name="Enviar WhatsApp")).to_be_disabled()
+                page.get_by_label("WhatsApp do destinatário").fill("99999-9999")
+                expect(page.locator("#telefone-validacao")).to_contain_text("Informe um número")
+                expect(page.get_by_role("button", name="Enviar WhatsApp")).to_be_disabled()
+                assert not enviados
+                page.get_by_label("WhatsApp do destinatário").fill("(86) 99999-9999")
+                expect(page.locator("#telefone-validacao")).to_contain_text("+5586999999999")
                 page.get_by_role("button", name="Enviar WhatsApp").click()
                 expect(page.locator("#envio-estado")).to_contain_text("Mensagem aceita")
-                expect(page.locator("#envio-historico")).to_contain_text("***0001")
-                page.get_by_role("button", name="Enviar WhatsApp").click()
-                expect(page.locator("#envio-estado")).to_contain_text("Mensagem aceita")
+                expect(page.locator("#envio-historico")).to_contain_text("***9999")
+                expect(page.get_by_role("button", name="Enviar WhatsApp")).to_be_disabled()
+                assert json.loads(enviados[0].content)["to"] == "5586999999999"
+                page.reload()
+                page.get_by_role("button", name="Ver execução").first.click()
+                expect(page.locator("#envio-historico")).to_contain_text("Mensagem aceita")
+                expect(page.get_by_role("button", name="Enviar WhatsApp")).to_be_disabled()
                 assert len(enviados) == 1
             finally:
                 browser.close()
+
+
+def test_template_integrado_telefone_brasileiro_e_segredo_nao_exposto(tmp_path):
+    config = replace(settings(tmp_path), whatsapp_template_name="panorama_teste")
+    chamadas = []
+
+    def handler(request):
+        if request.url.host == "olinda.bcb.gov.br":
+            return httpx.Response(200, json=BCB_PAYLOAD)
+        chamadas.append(json.loads(request.content))
+        return httpx.Response(200, json={"messages": [{"id": "wamid.template"}]})
+
+    with TestClient(create_app(config, http_transport=httpx.MockTransport(handler))) as client:
+        pagina = client.get("/").text
+        assert "modelo aprovado" in pagina
+        assert config.whatsapp_token not in pagina
+        consulta = client.post("/api/consultas/mercado", json=ENTRADA).json()
+        rota = f"/api/consultas/{consulta['id']}/envios"
+        assert client.post(rota, json={"destinatario": "99999-9999"}).status_code == 422
+        assert not chamadas
+        response = client.post(rota, json={"destinatario": "(86) 99999-9999"})
+        envio = response.json()
+        assert envio["status"] == "ACEITO"
+        assert envio["destinatario"] == "5586999999999"
+        assert envio["mensagem"] == consulta["mensagem_gerada"]
+        assert chamadas[0]["template"]["components"][0]["parameters"][0]["text"] == " ".join(envio["mensagem"].split())
+        assert chamadas[0]["to"] == envio["destinatario"]
+        assert client.get(rota).json() == [envio]
+        assert config.whatsapp_token not in response.text
+        assert client.post(rota, json={"destinatario": "+55 86 99999-9999"}).json() == envio
+        assert len(chamadas) == 1

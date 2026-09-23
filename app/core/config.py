@@ -19,6 +19,8 @@ class Settings:
     whatsapp_token: str = field(default="", repr=False)
     whatsapp_phone_number_id: str = ""
     whatsapp_api_version: str = ""
+    whatsapp_template_name: str = ""
+    whatsapp_template_language: str = "pt_BR"
 
     def __post_init__(self) -> None:
         if min(self.browser_timeout_ms, self.query_timeout_seconds, self.duplicate_seconds, self.http_timeout_seconds) <= 0:
@@ -30,6 +32,13 @@ class Settings:
             raise ValueError("WHATSAPP_PHONE_NUMBER_ID deve ser numérico.")
         if self.whatsapp_api_version and not re.fullmatch(r"v[0-9]+\.0", self.whatsapp_api_version):
             raise ValueError("WHATSAPP_API_VERSION deve seguir o formato vNN.0.")
+        if self.whatsapp_template_name:
+            if not all(credenciais):
+                raise ValueError("Configure as credenciais WHATSAPP para usar um template.")
+            if not re.fullmatch(r"[a-z0-9_]+", self.whatsapp_template_name):
+                raise ValueError("WHATSAPP_TEMPLATE_NAME deve conter letras minúsculas, números ou sublinhados.")
+            if not re.fullmatch(r"[a-z]{2,3}(?:_[A-Z]{2})?", self.whatsapp_template_language):
+                raise ValueError("WHATSAPP_TEMPLATE_LANGUAGE deve ser um código de idioma válido.")
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -47,4 +56,6 @@ class Settings:
             whatsapp_token=os.getenv("WHATSAPP_ACCESS_TOKEN") or "",
             whatsapp_phone_number_id=os.getenv("WHATSAPP_PHONE_NUMBER_ID") or "",
             whatsapp_api_version=os.getenv("WHATSAPP_API_VERSION") or "",
+            whatsapp_template_name=os.getenv("WHATSAPP_TEMPLATE_NAME") or "",
+            whatsapp_template_language=os.getenv("WHATSAPP_TEMPLATE_LANGUAGE") or "pt_BR",
         )

@@ -28,9 +28,11 @@ class SQLiteEnvioRepository:
         try:
             with Session(self.engine) as session, session.begin():
                 session.execute(text("BEGIN IMMEDIATE"))
+                # Serializa a reserva por execução, inclusive quando o telefone muda.
+                # Mantém os registros antigos sem exigir uma migração destrutiva.
                 existente = session.scalar(select(EnvioModel).where(
-                    EnvioModel.execucao_id == execucao_id, EnvioModel.destinatario == destinatario,
-                ))
+                    EnvioModel.execucao_id == execucao_id,
+                ).order_by(EnvioModel.data_hora.desc()))
                 if existente:
                     existente.tentativas += 1
                     if (existente.status == StatusEnvio.ENVIANDO and

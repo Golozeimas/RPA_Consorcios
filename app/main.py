@@ -51,6 +51,7 @@ def create_app(
         message_gateway or WhatsAppClient(
             http_client, settings.whatsapp_token, settings.whatsapp_phone_number_id,
             settings.whatsapp_api_version, settings.http_timeout_seconds,
+            settings.whatsapp_template_name, settings.whatsapp_template_language,
         ),
         SQLiteEnvioRepository(engine, settings.http_timeout_seconds * 4 + 30),
     )
@@ -69,7 +70,7 @@ def create_app(
             engine.dispose()
 
     app = FastAPI(title="Consulta pública BCB — Consórcios", lifespan=lifespan)
-    app.include_router(criar_router(service, mercado, envio))
+    app.include_router(criar_router(service, mercado, envio, bool(settings.whatsapp_template_name)))
     app.mount("/static", StaticFiles(directory=ROOT / "app" / "static"), name="static")
 
     @app.exception_handler(PersistenciaError)

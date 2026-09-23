@@ -1,11 +1,11 @@
-from pydantic import AwareDatetime, BaseModel, ConfigDict, field_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 
 from app.domain import StatusEnvio, normalizar_destinatario
 
 
 class EnvioInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    destinatario: str
+    destinatario: str = Field(max_length=30)
 
     @field_validator("destinatario")
     @classmethod
