@@ -59,3 +59,38 @@ Reserva transacional SQLite e chave ativa única impedem corrida; uma janela cur
 após conclusão evita reenvio imediato. Após a janela uma nova consulta é permitida.
 Execuções interrompidas expiram após o prazo total mais uma margem e ficam como
 ERRO quando uma nova tentativa da mesma consulta as encontra.
+
+## Mapeamento verificado para a consulta ampliada
+
+Inspeção da documentação oficial e dos recursos `GrupoDeMetricas`,
+`CadastroDeMetricas` e `Metricas` em 23/09/2026. O recurso `Metricas` recebe
+somente `DataBase` (`AAAAMM`) e devolve `DataBase`, `IdMetrica`, `Grupo`,
+`Metrica`, `Valor` e `Unidade`. Não há dimensão ou identificador de
+administradora, segmento ou UF no registro; os dois últimos aparecem como
+métricas distintas no catálogo. Os resultados são agregados, sem atribuição
+a uma administradora.
+
+| Campo | IdMetrica / nome oficial | Unidade | Limite semântico |
+| --- | --- | --- | --- |
+| grupos_ativos | 9 — Grupos de Consórcio ativos - Total | unidade | Nacional; não há desagregação por segmento/UF |
+| cotas_ativas | 10 — Cotas ativas - Total | mil | Nacional |
+| cotas_contempladas | 28 — Cotas ativas contempladas no últimos 12 meses - Total | mil | Janela de 12 meses até a DataBase |
+| cotas_comercializadas | 54 — Cotas Comercializadas nos últimos 12 meses - Total | mil | Janela de 12 meses até a DataBase |
+| créditos_comercializados | Nenhuma métrica correspondente | — | 85 é **valor médio** de créditos de grupos constituídos, não total comercializado |
+| administradora | Nenhum campo/ID no recurso | — | Nome informado pelo usuário não é comprovação de vínculo aos dados |
+| período_referencia | DataBase retornado | AAAAMM | Obtido da resposta, não da data de execução |
+
+Desagregação verificada no catálogo: cotas ativas 11 (Imóveis), 12 (Veículos
+Pesados), 13 (Automóveis), 14 (Motocicletas) e 16 (Serviços); contempladas
+31 (Imóveis), 34 (Automóveis), 37 (Motocicletas); comercializadas 55
+(Imóveis), 56 (Veículos Pesados), 57 (Automóveis), 58 (Motocicletas), 60
+(Serviços). A métrica 37 consta com unidade `mi` no catálogo/retorno, ambígua
+em relação a `mil`; não converter sem confirmação do BCB. Métricas 99–125
+representam **somente cotas ativas por estado**. A entrada simultânea de
+segmento e UF não tem métrica conjunta.
+
+Respostas reais: para DataBase `202606`, 125 registros, incluindo IDs 9=16251
+unidades, 10=13376.26 mil, 28=1855.35 mil e 54=5723.74 mil. Para `202609`,
+resposta HTTP 200 com `value: []`. Assim, junho/2026 é o período mais recente
+observado, mas o código deve descobri-lo consultando as respostas, sem fixar
+esse mês.

@@ -13,24 +13,31 @@
   <p class="mb-1"><strong>Fonte:</strong> {{ fonte }}</p>
   <p><strong>Dataset:</strong> {{ dataset }}</p>
   <form id="consulta-form" class="card card-body my-4">
-    <label for="metrica" class="form-label">Métrica</label>
-    <input id="metrica" class="form-control mb-3" value="{{ metrica }}" readonly>
+    <label for="administradora" class="form-label">Administradora solicitada</label>
+    <input id="administradora" name="administradora" class="form-control" maxlength="160" required>
+    <p class="form-text">O conjunto do BCB apresenta agregados do mercado, sem valores por administradora. O nome identifica sua solicitação e não filtra os números.</p>
     <label for="periodo" class="form-label">Período</label>
-    <input id="periodo" name="periodo" type="month" class="form-control" required aria-describedby="periodo-ajuda">
-    <p id="periodo-ajuda" class="form-text">Informe o mês e ano de referência. Exemplo verificado: dezembro/2025. A disponibilidade depende da publicação do BCB.</p>
+    <input id="periodo" name="periodo" type="month" class="form-control" aria-describedby="periodo-ajuda">
+    <p id="periodo-ajuda" class="form-text">Opcional. Em branco, o RPA encontra o período trimestral mais recente publicado pelo BCB.</p>
+    <label for="segmento" class="form-label">Segmento</label>
+    <select id="segmento" name="segmento" class="form-select mb-3">
+      <option value="">Todos</option>
+      {% for item in segmentos %}<option value="{{ item }}">{{ item }}</option>{% endfor %}
+    </select>
+    <label for="uf" class="form-label">UF</label>
+    <select id="uf" name="uf" class="form-select mb-3">
+      <option value="">Brasil</option>
+      {% for item in ufs %}<option value="{{ item }}">{{ item }}</option>{% endfor %}
+    </select>
+    <p class="form-text">UF oferece somente cotas ativas; o BCB não publica este conjunto por segmento e UF juntos.</p>
     <button id="executar" type="submit" class="btn btn-primary align-self-start">Executar RPA</button>
   </form>
   <section id="estado" class="alert" role="status" aria-live="polite" hidden></section>
   <section id="resultado" class="card card-body mb-4" hidden>
     <h2 class="h4">Consulta concluída</h2>
-    <dl class="mb-0">
-      <dt>Fonte</dt><dd id="resultado-fonte"></dd>
-      <dt>Métrica</dt><dd id="resultado-metrica"></dd>
-      <dt>Período</dt><dd id="resultado-periodo"></dd>
-      <dt>Resultado</dt><dd id="resultado-valor"></dd>
-      <dt>Consultado em</dt><dd id="resultado-data"></dd>
-      <dt>Execução</dt><dd id="resultado-id"></dd>
-    </dl>
+    <dl id="resultado-campos" class="mb-0"></dl>
+    <h3 id="mensagem-titulo" class="h5 mt-3" hidden>Mensagem gerada</h3>
+    <pre id="mensagem" class="text-wrap" hidden></pre>
   </section>
   <section>
     <div class="d-flex align-items-center gap-3 mb-3">

@@ -7,15 +7,33 @@ from sqlalchemy import Engine, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.domain import Consulta, DATASET, Execucao, FONTE, PersistenciaError, Resultado, Status
+from app.domain import Consulta, ConsultaMercado, ConsorcioResultado, DATASET, Execucao, FONTE, PersistenciaError, Resultado, Status
 from app.models.execucao import ExecucaoModel
 
 logger = logging.getLogger(__name__)
 
 
-def _resultado_json(resultado: Resultado | None) -> dict[str, str] | None:
+def _resultado_json(
+    resultado: Resultado | ConsorcioResultado | None, mensagem_gerada: str | None
+) -> dict[str, object] | None:
     if resultado is None:
         return None
+    if isinstance(resultado, ConsorcioResultado):
+        return {
+            "administradora": resultado.administradora,
+            "periodo_referencia": resultado.periodo_referencia,
+            "grupos_ativos": resultado.grupos_ativos,
+            "cotas_ativas": resultado.cotas_ativas,
+            "cotas_contempladas": resultado.cotas_contempladas,
+            "cotas_comercializadas": resultado.cotas_comercializadas,
+            "creditos_comercializados": str(resultado.creditos_comercializados) if resultado.creditos_comercializados is not None else None,
+            "segmento": resultado.segmento, "uf": resultado.uf,
+            "abrangencia": resultado.abrangencia,
+            "data_consulta": resultado.data_consulta.isoformat(),
+            "fonte": resultado.fonte, "source_url": resultado.source_url,
+            "campos_indisponiveis": resultado.campos_indisponiveis,
+            "_mensagem_gerada": mensagem_gerada,
+        }
     return {
         "fonte": resultado.fonte, "consulta": resultado.consulta,
         "periodo": resultado.periodo, "metrica": resultado.metrica,
@@ -26,18 +44,37 @@ def _resultado_json(resultado: Resultado | None) -> dict[str, str] | None:
 
 def _entidade(model: ExecucaoModel) -> Execucao:
     resultado = None
+    mensagem_gerada = None
     if model.dados_extraidos is not None:
         registro = model.dados_extraidos
-        resultado = Resultado(
-            fonte=registro["fonte"], consulta=registro["consulta"], periodo=registro["periodo"],
-            metrica=registro["metrica"], valor=Decimal(registro["valor"]), unidade=registro["unidade"],
-            consultado_em=datetime.fromisoformat(registro["consultado_em"]),
-        )
+        if "periodo_referencia" in registro:
+            mensagem_gerada = registro.get("_mensagem_gerada")
+            resultado = ConsorcioResultado(
+                administradora=registro["administradora"],
+                periodo_referencia=registro["periodo_referencia"],
+                grupos_ativos=registro["grupos_ativos"],
+                cotas_ativas=registro["cotas_ativas"],
+                cotas_contempladas=registro["cotas_contempladas"],
+                cotas_comercializadas=registro["cotas_comercializadas"],
+                creditos_comercializados=Decimal(registro["creditos_comercializados"]) if registro["creditos_comercializados"] is not None else None,
+                segmento=registro["segmento"], uf=registro["uf"],
+                abrangencia=registro["abrangencia"],
+                data_consulta=datetime.fromisoformat(registro["data_consulta"]),
+                fonte=registro["fonte"], source_url=registro["source_url"],
+                campos_indisponiveis=registro["campos_indisponiveis"],
+            )
+        else:
+            resultado = Resultado(
+                fonte=registro["fonte"], consulta=registro["consulta"], periodo=registro["periodo"],
+                metrica=registro["metrica"], valor=Decimal(registro["valor"]), unidade=registro["unidade"],
+                consultado_em=datetime.fromisoformat(registro["consultado_em"]),
+            )
     return Execucao(
         id=model.id, fonte=model.fonte, tipo_consulta=model.tipo_consulta,
         parametros=model.parametros, data_hora=datetime.fromtimestamp(model.data_hora, timezone.utc),
         status=Status(model.status), hash_consulta=model.hash_consulta,
         dados_extraidos=resultado, erro=model.erro, duplicada_de=model.duplicada_de,
+        mensagem_gerada=mensagem_gerada,
     )
 
 
@@ -47,7 +84,7 @@ class SQLiteExecutionRepository:
         self.duplicate_seconds = duplicate_seconds
         self.stale_seconds = stale_seconds
 
-    def reservar(self, consulta: Consulta, agora: datetime) -> Execucao:
+    def reservar(self, consulta: Consulta | ConsultaMercado, agora: datetime) -> Execucao:
         try:
             with Session(self.engine) as session:
                 # Serializa somente a reserva, inclusive entre processos. Sem transação durante RPA.
@@ -68,7 +105,8 @@ class SQLiteExecutionRepository:
                     ExecucaoModel.finalizado_em > agora.timestamp() - self.duplicate_seconds,
                 ).order_by(ExecucaoModel.finalizado_em.desc()).limit(1))
                 model = ExecucaoModel(
-                    id=str(uuid4()), fonte=FONTE, tipo_consulta=DATASET,
+                    id=str(uuid4()), fonte=FONTE,
+                    tipo_consulta="mercado_consorcios" if isinstance(consulta, ConsultaMercado) else DATASET,
                     parametros=consulta.parametros, data_hora=agora.timestamp(),
                     status=Status.DUPLICADA if recente else Status.PROCESSANDO,
                     hash_consulta=consulta.hash_consulta,
@@ -85,7 +123,8 @@ class SQLiteExecutionRepository:
             raise PersistenciaError("Não foi possível registrar a consulta no banco de dados.") from exc
 
     def finalizar(
-        self, id: str, status: Status, resultado: Resultado | None, erro: str | None
+        self, id: str, status: Status, resultado: Resultado | ConsorcioResultado | None,
+        erro: str | None, mensagem_gerada: str | None = None,
     ) -> Execucao:
         try:
             with Session(self.engine) as session, session.begin():
@@ -94,7 +133,7 @@ class SQLiteExecutionRepository:
                 if model is None or model.status != Status.PROCESSANDO:
                     raise PersistenciaError("A execução não está disponível para atualização.")
                 model.status = status
-                model.dados_extraidos = _resultado_json(resultado)
+                model.dados_extraidos = _resultado_json(resultado, mensagem_gerada)
                 model.erro = erro
                 model.chave_ativa = None
                 model.finalizado_em = datetime.now(timezone.utc).timestamp()

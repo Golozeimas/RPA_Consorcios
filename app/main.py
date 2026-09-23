@@ -14,13 +14,18 @@ from app.domain import PersistenciaError
 from app.models.execucao import Base
 from app.repositories.execucao_repository import SQLiteExecutionRepository
 from app.services.bcb_service import BCBService
+from app.services.bcb_mercado_service import BCBMercadoService
 from app.services.consulta_service import ConsultaService
 from app.services.ports import PublicQueryGateway
 
 logger = logging.getLogger(__name__)
 
 
-def create_app(settings: Settings | None = None, gateway: PublicQueryGateway | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    gateway: PublicQueryGateway | None = None,
+    mercado_gateway: PublicQueryGateway | None = None,
+) -> FastAPI:
     settings = settings or Settings.from_env()
     engine = create_engine(
         URL.create("sqlite", database=str(settings.database_path)),
@@ -29,8 +34,12 @@ def create_app(settings: Settings | None = None, gateway: PublicQueryGateway | N
     repository = SQLiteExecutionRepository(
         engine, settings.duplicate_seconds, settings.query_timeout_seconds + 30
     )
-    bcb = gateway or BCBService(BCBConsorciosRpa(settings.browser_timeout_ms, settings.headless))
+    rpa = BCBConsorciosRpa(settings.browser_timeout_ms, settings.headless)
+    bcb = gateway or BCBService(rpa)
     service = ConsultaService(bcb, repository, settings.query_timeout_seconds)
+    mercado = ConsultaService(
+        mercado_gateway or BCBMercadoService(rpa), repository, settings.query_timeout_seconds
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -44,7 +53,7 @@ def create_app(settings: Settings | None = None, gateway: PublicQueryGateway | N
             engine.dispose()
 
     app = FastAPI(title="Consulta pública BCB — Consórcios", lifespan=lifespan)
-    app.include_router(criar_router(service))
+    app.include_router(criar_router(service, mercado))
     app.mount("/static", StaticFiles(directory=ROOT / "app" / "static"), name="static")
 
     @app.exception_handler(PersistenciaError)

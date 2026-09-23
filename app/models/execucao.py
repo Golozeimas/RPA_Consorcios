@@ -13,7 +13,7 @@ class ExecucaoModel(Base):
     fonte: Mapped[str]
     tipo_consulta: Mapped[str]
     parametros: Mapped[dict[str, str]] = mapped_column(JSON)
-    dados_extraidos: Mapped[dict[str, str] | None] = mapped_column(JSON, nullable=True)
+    dados_extraidos: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
     data_hora: Mapped[float] = mapped_column(Float)
     finalizado_em: Mapped[float | None] = mapped_column(Float, nullable=True)
     status: Mapped[str]

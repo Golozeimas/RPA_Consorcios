@@ -2,7 +2,8 @@ import asyncio
 from datetime import datetime, timezone
 import logging
 
-from app.domain import Consulta, ConsultaError, Execucao, Status
+from app.domain import Consulta, ConsultaError, ConsultaMercado, ConsorcioResultado, Execucao, Status
+from app.services.mensagem_service import gerar_mensagem
 from app.services.ports import ExecutionRepository, PublicQueryGateway
 
 logger = logging.getLogger(__name__)
@@ -16,18 +17,21 @@ class ConsultaService:
         self.repository = repository
         self.timeout_seconds = timeout_seconds
 
-    async def executar(self, consulta: Consulta) -> Execucao:
+    async def executar(self, consulta: Consulta | ConsultaMercado) -> Execucao:
         execucao = self.repository.reservar(consulta, datetime.now(timezone.utc))
         logger.info("consulta_inicio id=%s parametros=%s", execucao.id, consulta.parametros)
         if execucao.status == Status.DUPLICADA:
             logger.info("consulta_duplicada id=%s original=%s", execucao.id, execucao.duplicada_de)
             return execucao
         resultado = None
+        mensagem_gerada = None
         erro = None
         status = Status.ERRO
         try:
             async with asyncio.timeout(self.timeout_seconds):
                 resultado = await self.bcb.consultar(consulta)
+            if isinstance(resultado, ConsorcioResultado):
+                mensagem_gerada = gerar_mensagem(resultado)
             status = Status.SUCESSO if resultado is not None else Status.SEM_RESULTADO
             logger.info("consulta_resultado id=%s status=%s", execucao.id, status)
         except asyncio.CancelledError:
@@ -43,7 +47,7 @@ class ConsultaService:
             erro = "Não foi possível concluir a consulta. Tente novamente mais tarde."
             logger.exception("consulta_inesperada id=%s", execucao.id)
         # A reserva continua no histórico se o banco falhar; a rota trata o erro.
-        final = self.repository.finalizar(execucao.id, status, resultado, erro)
+        final = self.repository.finalizar(execucao.id, status, resultado, erro, mensagem_gerada)
         logger.info("consulta_fim id=%s status=%s", final.id, final.status)
         return final
 
