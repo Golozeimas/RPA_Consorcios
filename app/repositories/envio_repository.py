@@ -10,12 +10,21 @@ from app.models.envio import EnvioModel
 from app.models.execucao import ExecucaoModel
 
 
+def atualizar_schema_envios(engine: Engine) -> None:
+    """Migração aditiva para bancos anteriores ao registro do status do provedor."""
+    with engine.begin() as connection:
+        connection.execute(text("BEGIN IMMEDIATE"))
+        colunas = {linha[1] for linha in connection.execute(text("PRAGMA table_info(envios)"))}
+        if "provedor_status" not in colunas:
+            connection.execute(text("ALTER TABLE envios ADD COLUMN provedor_status VARCHAR(40)"))
+
+
 def _entidade(model: EnvioModel) -> Envio:
     return Envio(
         id=model.id, execucao_id=model.execucao_id, destinatario=model.destinatario,
         mensagem=model.mensagem, status=StatusEnvio(model.status),
         data_hora=datetime.fromtimestamp(model.data_hora, timezone.utc),
-        provedor_id=model.provedor_id, erro=model.erro,
+        provedor_id=model.provedor_id, provedor_status=model.provedor_status, erro=model.erro,
     )
 
 
@@ -57,13 +66,15 @@ class SQLiteEnvioRepository:
         except SQLAlchemyError as exc:
             raise PersistenciaError("Não foi possível registrar o envio. Nenhuma nova mensagem foi enviada.") from exc
 
-    def finalizar_envio(self, id: str, status: StatusEnvio, provedor_id: str | None, erro: str | None) -> Envio:
+    def finalizar_envio(self, id: str, status: StatusEnvio, provedor_id: str | None, erro: str | None,
+                       provedor_status: str | None = None) -> Envio:
         try:
             with Session(self.engine) as session, session.begin():
                 model = session.get(EnvioModel, id)
                 if model is None or model.status not in {StatusEnvio.ENVIANDO, StatusEnvio.INCERTO}:
                     raise PersistenciaError("O envio não está disponível para atualização.")
                 model.status, model.provedor_id, model.erro = status, provedor_id, erro
+                model.provedor_status = provedor_status
                 model.finalizado_em = datetime.now(timezone.utc).timestamp()
                 session.flush()
                 return _entidade(model)

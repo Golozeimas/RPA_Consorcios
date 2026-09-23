@@ -31,7 +31,7 @@ A arquitetura considera a stack definida para o projeto:
 - **SQLAlchemy** — persistência e acesso ao banco.
 - **SQLite** — banco de dados do MVP.
 - **httpx** — comunicação HTTP com serviços externos.
-- **Meta WhatsApp Cloud API** — envio das mensagens.
+- **Twilio (SDK Python)** — envio das mensagens WhatsApp.
 - **Jinja2** — renderização das páginas HTML.
 - **Bootstrap 5** — interface e responsividade.
 - **python-dotenv** — carregamento das variáveis de ambiente.
@@ -60,7 +60,7 @@ A aplicação será dividida nas seguintes camadas:
                 ▼               ▼
 ┌──────────────────────┐  ┌──────────────────────┐
 │ Camada de Automação  │  │ Camada de Integração │
-│      Playwright      │  │ WhatsApp Cloud API   │
+│      Playwright      │  │ Twilio WhatsApp SDK  │
 └──────────────────────┘  └──────────────────────┘
                 │
                 ▼
@@ -284,17 +284,17 @@ Para este projeto, a principal integração é o WhatsApp.
 
 Responsabilidades:
 
-- Montar a requisição HTTP necessária.
+- Usar o SDK oficial para realizar o envio.
 - Utilizar as credenciais configuradas no ambiente.
-- Enviar a mensagem pela Meta WhatsApp Cloud API.
+- Enviar a mensagem pelo SDK Twilio WhatsApp.
 - Interpretar a resposta da API.
 - Retornar o status do envio.
 - Tratar erros de comunicação.
 
 Tecnologias principais:
 
-- `httpx`
-- Meta WhatsApp Cloud API.
+- `httpx` para a consulta BCB.
+- `twilio` para envio WhatsApp.
 
 ---
 
@@ -360,7 +360,7 @@ ConsultaService
   ├──► WhatsAppIntegration
   │       │
   │       ▼
-  │    WhatsApp Cloud API
+  │    Twilio WhatsApp API
   │
   └──► Repository
          Atualiza status final
@@ -499,9 +499,9 @@ Exemplo de `.env.example`:
 
 ```env
 DATABASE_URL=
-WHATSAPP_ACCESS_TOKEN=
-WHATSAPP_PHONE_NUMBER_ID=
-WHATSAPP_API_VERSION=
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_WHATSAPP_FROM=
 ```
 
 O arquivo `.env` deve permanecer fora do versionamento.
@@ -576,8 +576,8 @@ Services
         ▼               ▼                 ▼
 AUTOMAÇÃO           PERSISTÊNCIA       INTEGRAÇÃO
 Playwright          Repository         WhatsApp
-                    SQLAlchemy          httpx
-                    SQLite              Cloud API
+                    SQLAlchemy          SDK Twilio
+                    SQLite              WhatsApp API
 
 SUPORTE
 Pydantic + Config + Logging + Pytest

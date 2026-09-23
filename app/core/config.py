@@ -16,29 +16,20 @@ class Settings:
     duplicate_seconds: int = 30
     headless: bool = True
     http_timeout_seconds: int = 30
-    whatsapp_token: str = field(default="", repr=False)
-    whatsapp_phone_number_id: str = ""
-    whatsapp_api_version: str = ""
-    whatsapp_template_name: str = ""
-    whatsapp_template_language: str = "pt_BR"
+    twilio_account_sid: str = field(default="", repr=False)
+    twilio_auth_token: str = field(default="", repr=False)
+    twilio_whatsapp_from: str = ""
 
     def __post_init__(self) -> None:
         if min(self.browser_timeout_ms, self.query_timeout_seconds, self.duplicate_seconds, self.http_timeout_seconds) <= 0:
             raise ValueError("Os tempos de configuração devem ser positivos.")
-        credenciais = (self.whatsapp_token, self.whatsapp_phone_number_id, self.whatsapp_api_version)
+        credenciais = (self.twilio_account_sid, self.twilio_auth_token, self.twilio_whatsapp_from)
         if any(credenciais) and not all(credenciais):
-            raise ValueError("Configure todas as variáveis WHATSAPP ou deixe todas vazias.")
-        if self.whatsapp_phone_number_id and not re.fullmatch(r"[0-9]+", self.whatsapp_phone_number_id):
-            raise ValueError("WHATSAPP_PHONE_NUMBER_ID deve ser numérico.")
-        if self.whatsapp_api_version and not re.fullmatch(r"v[0-9]+\.0", self.whatsapp_api_version):
-            raise ValueError("WHATSAPP_API_VERSION deve seguir o formato vNN.0.")
-        if self.whatsapp_template_name:
-            if not all(credenciais):
-                raise ValueError("Configure as credenciais WHATSAPP para usar um template.")
-            if not re.fullmatch(r"[a-z0-9_]+", self.whatsapp_template_name):
-                raise ValueError("WHATSAPP_TEMPLATE_NAME deve conter letras minúsculas, números ou sublinhados.")
-            if not re.fullmatch(r"[a-z]{2,3}(?:_[A-Z]{2})?", self.whatsapp_template_language):
-                raise ValueError("WHATSAPP_TEMPLATE_LANGUAGE deve ser um código de idioma válido.")
+            raise ValueError("Configure TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN e TWILIO_WHATSAPP_FROM juntos.")
+        if self.twilio_account_sid and not re.fullmatch(r"AC[0-9a-fA-F]{32}", self.twilio_account_sid):
+            raise ValueError("TWILIO_ACCOUNT_SID deve ser um Account SID válido.")
+        if self.twilio_whatsapp_from and not re.fullmatch(r"whatsapp:\+[1-9][0-9]{7,14}", self.twilio_whatsapp_from):
+            raise ValueError("TWILIO_WHATSAPP_FROM deve seguir o formato whatsapp:+DDINUMERO.")
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -53,9 +44,7 @@ class Settings:
             duplicate_seconds=int(os.getenv("DUPLICATE_SECONDS") or "30"),
             headless=headless == "true",
             http_timeout_seconds=int(os.getenv("HTTP_TIMEOUT_SECONDS") or "30"),
-            whatsapp_token=os.getenv("WHATSAPP_ACCESS_TOKEN") or "",
-            whatsapp_phone_number_id=os.getenv("WHATSAPP_PHONE_NUMBER_ID") or "",
-            whatsapp_api_version=os.getenv("WHATSAPP_API_VERSION") or "",
-            whatsapp_template_name=os.getenv("WHATSAPP_TEMPLATE_NAME") or "",
-            whatsapp_template_language=os.getenv("WHATSAPP_TEMPLATE_LANGUAGE") or "pt_BR",
+            twilio_account_sid=(os.getenv("TWILIO_ACCOUNT_SID") or "").strip(),
+            twilio_auth_token=(os.getenv("TWILIO_AUTH_TOKEN") or "").strip(),
+            twilio_whatsapp_from=(os.getenv("TWILIO_WHATSAPP_FROM") or "").strip(),
         )

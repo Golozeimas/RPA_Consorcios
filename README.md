@@ -1,7 +1,7 @@
 # Consulta pública BCB — Consórcios
 
 MVP Python/FastAPI: API oficial BCB via httpx → validação Pydantic → SQLite
-→ resultado e mensagem → envio explícito pela Meta WhatsApp Cloud API → histórico.
+→ resultado e mensagem → envio explícito pelo SDK Twilio WhatsApp → histórico.
 
 ## Executar
 
@@ -32,14 +32,13 @@ vazios usam os padrões abaixo:
 | DUPLICATE_SECONDS | 30 |
 | BROWSER_HEADLESS | true |
 | HTTP_TIMEOUT_SECONDS | 30 |
-| WHATSAPP_ACCESS_TOKEN | vazio (envio desabilitado até configurar) |
-| WHATSAPP_PHONE_NUMBER_ID | vazio |
-| WHATSAPP_API_VERSION | vazio; informe uma versão Graph API suportada, no formato vNN.0 |
-| WHATSAPP_TEMPLATE_NAME | vazio preserva o envio de texto; preenchido seleciona template aprovado |
-| WHATSAPP_TEMPLATE_LANGUAGE | pt_BR; deve corresponder ao idioma aprovado do template |
+| TWILIO_ACCOUNT_SID | vazio (envio desabilitado até configurar) |
+| TWILIO_AUTH_TOKEN | vazio |
+| TWILIO_WHATSAPP_FROM | vazio; remetente no formato `whatsapp:+<DDI><número>` |
 
-Token, Phone Number ID e versão da API devem ser configurados juntos em `.env`. Nunca
-versione esse arquivo. Configuração parcial/ inválida impede a inicialização.
+As três variáveis `TWILIO_*` devem ser configuradas juntas em `.env`.
+Nunca versione esse arquivo. Configuração parcial ou inválida impede a inicialização.
+O destinatário vem do formulário; não existe `TWILIO_WHATSAPP_TO` fixo.
 As variáveis `BROWSER_*` são usadas somente pelo adaptador de navegador legado.
 Bootstrap 5 é carregado por CDN; o formulário e o JavaScript local não dependem
 de JavaScript do Bootstrap. A consulta requer acesso ao domínio Olinda.
@@ -86,7 +85,7 @@ Veja [o mapeamento e a investigação](docs/CONSULTA_BCB.md).
 - `app/services`: caso de uso, transformação BCB e portas injetadas.
 - `app/domain.py`: entidades, estados, identidade normalizada e erros.
 - `app/automation`: adaptador Playwright.
-- `app/integrations`: clientes HTTP BCB e Meta; sem regras de negócio nas rotas.
+- `app/integrations`: cliente HTTP BCB e adaptador do SDK Twilio; sem regras de negócio nas rotas.
 - `app/models`, `repositories`: infraestrutura SQLAlchemy/SQLite, seguindo as pastas existentes.
 - `app/main.py`: composição das dependências e ciclo de vida.
 
@@ -123,28 +122,34 @@ WhatsApp disponível nesse número. O botão fica bloqueado com telefone inváli
 durante o envio e quando já existe uma tentativa para a execução.
 A aplicação envia a mensagem salva, não um
 texto arbitrário recebido do navegador. A consulta nunca dispara envio sozinha.
-O destinatário deve autorizar o contato e ter iniciado uma conversa nas últimas
-24 horas, conforme a [documentação da Meta](https://whatsapp.github.io/WhatsApp-Nodejs-SDK/).
-Envios fora dessa janela exigem templates aprovados. Configure
-`WHATSAPP_TEMPLATE_NAME` e `WHATSAPP_TEMPLATE_LANGUAGE` para habilitar esse modo.
-O adaptador suporta um template previamente aprovado com **um parâmetro posicional
-de texto no corpo (`{{1}}`)**, sem parâmetros em cabeçalho/botões. Esse parâmetro
-recebe a mensagem gerada, com espaços normalizados para uma única linha e limite
-de 1024 caracteres (mensagens maiores falham sem envio, nunca são truncadas).
-O texto fixo e a aprovação do modelo são administrados na Meta; o template deve
-ser compatível com esse contrato. O aplicativo não cria nem aprova templates.
-Referência: [envio de templates na documentação da Meta](https://whatsapp.github.io/WhatsApp-Nodejs-SDK/api-reference/messages/template/).
-Não há fallback de template para texto em caso de falha. A tela informa a modalidade
-configurada; no modo texto, o operador deve verificar a janela de atendimento,
-pois este MVP não recebe webhooks de mensagens de entrada.
+Para desenvolvimento/demonstração:
+
+1. Crie sua conta Twilio e obtenha Account SID e Auth Token no Console.
+2. Ative o Sandbox for WhatsApp seguindo o [guia oficial da Twilio](https://www.twilio.com/docs/whatsapp/sandbox).
+3. No WhatsApp do destinatário, envie `join <código do seu Sandbox>` ao número
+   exibido no Console e aguarde a confirmação. Não há número/código fixo no projeto.
+4. Na raiz do projeto, crie/edite `.env` com `TWILIO_ACCOUNT_SID`,
+   `TWILIO_AUTH_TOKEN` e `TWILIO_WHATSAPP_FROM`; este último recebe
+   `whatsapp:+<número internacional do remetente mostrado no Console>`.
+5. Instale `requirements.txt` e reinicie a aplicação com os comandos da seção Executar.
+6. Selecione segmento/período, consulte, confira a mensagem gerada e informe
+   o telefone que aderiu ao Sandbox. Clique **Enviar WhatsApp**.
+7. Confira o resultado no histórico de envios, acessível ao abrir a execução.
+
+Esta demonstração envia texto livre dentro da janela de atendimento de 24 horas
+aberta por uma mensagem do destinatário (a associação ao Sandbox também abre
+essa janela). Fora dela, envie uma nova mensagem ao remetente antes de demonstrar.
+Templates Twilio não fazem parte deste fluxo. O Sandbox exige nova associação
+quando a sessão expira. Consulte no guia oficial as limitações vigentes da conta
+e de entrega por país.
 
 `POST /api/consultas/{id}/envios` recebe `{"destinatario":"(86) 99999-9999"}`.
 O ID da execução identifica a mensagem persistida; não é necessário reenviá-la
-pelo navegador. As credenciais e a requisição à Meta ficam somente no servidor.
+pelo navegador. As credenciais e a chamada ao SDK Twilio ficam somente no servidor.
 `GET /api/consultas/{id}/envios` exibe o histórico, também acessível pelos detalhes
 da consulta na tela. A tabela adicional `envios` é criada sem alterar ou apagar
-as consultas existentes. Guarda destinatário, mensagem, datas, status, ID da Meta,
-erro e contador de tentativas repetidas.
+as consultas existentes. Guarda destinatário, mensagem, datas, status, Message SID,
+status inicial da Twilio, erro e contador de tentativas repetidas.
 
 Uma reserva transacional por execução, além da unicidade existente
 `(execucao_id, destinatario)`, impede envios concorrentes/repetidos, inclusive após
@@ -155,10 +160,26 @@ Não há retries automáticos. Para corrigir falhas definitivas, ajuste a config
 e faça uma nova consulta; antes disso, confira o histórico.
 
 Estados: ENVIANDO, ACEITO, ERRO e INCERTO. ACEITO exige ID válido devolvido pela
-Meta e não significa entregue/lido; não implementamos webhooks de entrega.
+Twilio e não significa entregue/lido; não implementamos webhooks de entrega.
 Timeout, HTTP 5xx ou resposta inválida ficam INCERTO. Interrupção abrupta ou falha
 ao salvar deixa a reserva bloqueada; uma tentativa repetida após o prazo converte
 ENVIANDO em INCERTO. Verifique no provedor antes de iniciar outro envio.
+
+A tabela `envios` recebe somente a coluna opcional `provedor_status` na
+inicialização. A migração é aditiva e preserva histórico e identificadores antigos.
+O campo `provedor_id` guarda o Message SID, e `provedor_status` registra o
+estado devolvido na criação (por exemplo, `queued`), sem acompanhamento posterior.
+O SDK usa `Client.messages.create_async`, timeout explícito, sessão encerrada
+após cada envio e nenhum retry automático. `httpx` permanece para o BCB.
+
+## Decisão arquitetural
+
+A Twilio foi adotada como camada de integração com o WhatsApp por oferecer
+uma API e SDK Python de integração simples, configuração adequada para
+demonstrações através do Twilio Sandbox e menor complexidade operacional
+para o escopo deste desafio técnico. A abstração do serviço de mensagens
+permite que a integração seja substituída futuramente por outro provedor,
+como a Meta WhatsApp Cloud API, sem afetar o fluxo principal do RPA.
 
 ## Verificação
 
@@ -175,8 +196,8 @@ python -m pytest tests/integration/test_live_bcb.py
 Os testes comuns usam fakes/SQLite temporário e não dependem do BCB. Testes de
 navegador determinísticos são opcionais e usam rotas locais interceptadas; a
 consulta real deve ser conferida separadamente pela aplicação. Não há linter ou
-verificador de tipos configurado no repositório. A Meta é simulada com
-`httpx.MockTransport`; os testes nunca enviam mensagens reais.
+verificador de tipos configurado no repositório. O transporte do SDK Twilio é
+simulado, e o BCB usa `httpx.MockTransport`; os testes nunca enviam mensagens reais.
 
 Em 23/09/2026, a consulta agregada real encontrou DataBase `202606` e
 normalizou 16.251 grupos ativos, 13.376.260 cotas ativas, 1.855.350 cotas

@@ -4,6 +4,7 @@ playwright
 pydantic
 sqlalchemy
 httpx
+twilio
 jinja2
 python-dotenv
 pytest

@@ -1,14 +1,15 @@
 """Fronteiras HTTP simuladas; nunca envia mensagens reais."""
 
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
 import json
 import os
 
+from aiohttp import ClientConnectionError
+from twilio.http.response import Response as TwilioResponse
 from fastapi.testclient import TestClient
 import httpx
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 
 from app.core.config import Settings
 from app.domain import PersistenciaError
@@ -31,11 +32,11 @@ DESTINO = {"destinatario": "+1 (555) 000-0001"}
 
 
 def settings(tmp_path):
-    return Settings(database_path=tmp_path / "http.sqlite3", whatsapp_token="token-ficticio-de-teste",
-                    whatsapp_phone_number_id="123", whatsapp_api_version="v23.0")
+    return Settings(database_path=tmp_path / "http.sqlite3", twilio_auth_token="token-ficticio-de-teste",
+                    twilio_account_sid="AC" + "0" * 32, twilio_whatsapp_from="whatsapp:+15550000002")
 
 
-def test_fluxo_http_validacao_mensagem_envio_historico_e_duplicidade(tmp_path):
+def test_fluxo_http_validacao_mensagem_envio_historico_e_duplicidade(tmp_path, twilio_request):
     requests = []
 
     def handler(request):
@@ -47,32 +48,33 @@ def test_fluxo_http_validacao_mensagem_envio_historico_e_duplicidade(tmp_path):
             assert request.url.params["$format"] == "json"
             assert request.url.params["$top"] == "200"
             return httpx.Response(200, json=BCB_PAYLOAD)
-        assert request.url == "https://graph.facebook.com/v23.0/123/messages"
-        payload = json.loads(request.content)
-        assert payload["to"] == "15550000001"
-        assert "5.558.340" in payload["text"]["body"]
-        assert payload["messaging_product"] == "whatsapp"
-        return httpx.Response(200, json={"messages": [{"id": "wamid.fixture"}]})
+        pytest.fail("httpx deve acessar somente o BCB")
 
     config = settings(tmp_path)
     transport = httpx.MockTransport(handler)
     with TestClient(create_app(config, http_transport=transport)) as client:
         consulta = client.post("/api/consultas/mercado", json=ENTRADA).json()
         assert consulta["status"] == "SUCESSO"
-        assert len(requests) == 1  # Consultar não envia automaticamente.
+        assert len(requests) == 1
+        twilio_request.assert_not_awaited()  # Consultar não envia automaticamente.
         rota = f"/api/consultas/{consulta['id']}/envios"
         envio = client.post(rota, json=DESTINO).json()
         assert envio["status"] == "ACEITO"
-        assert envio["provedor_id"] == "wamid.fixture"
+        assert envio["provedor_id"] == "SM" + "1" * 32
+        assert envio["provedor_status"] == "queued"
+        payload = twilio_request.call_args.kwargs["data"]
+        assert payload["To"] == "whatsapp:+15550000001"
+        assert payload["From"] == config.twilio_whatsapp_from
+        assert payload["Body"] == consulta["mensagem_gerada"]
         assert envio["mensagem"] == consulta["mensagem_gerada"]
         assert client.post(rota, json={"destinatario": "15550000001"}).json() == envio
         assert client.post(rota, json={"destinatario": "(86) 99999-9999"}).json() == envio
-        assert len(requests) == 2
+        assert twilio_request.await_count == 1
         assert client.get(rota).json() == [envio]
         assert client.post(rota, json={"destinatario": "inválido"}).status_code == 422
     with TestClient(create_app(config, http_transport=httpx.MockTransport(handler))) as client:
         assert client.post(rota, json=DESTINO).json() == envio
-        assert len(requests) == 2  # Proteção sobrevive ao reinício.
+        assert twilio_request.await_count == 1  # Proteção sobrevive ao reinício.
 
 
 def test_subsegmento_oficial_na_tela_e_na_consulta(tmp_path):
@@ -97,24 +99,22 @@ def test_subsegmento_oficial_na_tela_e_na_consulta(tmp_path):
     ("400", "ERRO"), ("401", "ERRO"), ("403", "ERRO"), ("429", "ERRO"),
     ("invalid-json", "INCERTO"), ("invalid-schema", "INCERTO"),
 ])
-def test_falhas_whatsapp_persistidas_sem_reenvio(tmp_path, cenario, status):
-    chamadas = []
-
-    def handler(request):
-        if request.url.host == "olinda.bcb.gov.br":
-            return httpx.Response(200, json=BCB_PAYLOAD)
-        chamadas.append(request)
+def test_falhas_whatsapp_persistidas_sem_reenvio(tmp_path, cenario, status, twilio_request):
+    async def resposta(*args, **kwargs):
         if cenario == "timeout":
-            raise httpx.ReadTimeout("falha simulada", request=request)
+            raise TimeoutError("detalhe privado")
         if cenario == "connection":
-            raise httpx.ConnectError("falha simulada", request=request)
+            raise ClientConnectionError("detalhe privado")
         if cenario.isdigit():
-            return httpx.Response(int(cenario), json={"error": "detalhe privado do provedor"})
+            return TwilioResponse(int(cenario), json.dumps({"code": 20003, "message": "detalhe privado"}))
         if cenario == "invalid-json":
-            return httpx.Response(200, text="não é JSON")
-        return httpx.Response(200, json={"messages": []})
+            return TwilioResponse(201, "não é JSON")
+        return TwilioResponse(201, "{}")
 
-    with TestClient(create_app(settings(tmp_path), http_transport=httpx.MockTransport(handler))) as client:
+    twilio_request.side_effect = resposta
+    with TestClient(create_app(settings(tmp_path), http_transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json=BCB_PAYLOAD)
+    ))) as client:
         consulta = client.post("/api/consultas/mercado", json=ENTRADA).json()
         rota = f"/api/consultas/{consulta['id']}/envios"
         envio = client.post(rota, json=DESTINO).json()
@@ -123,7 +123,7 @@ def test_falhas_whatsapp_persistidas_sem_reenvio(tmp_path, cenario, status):
         assert "privado" not in envio["erro"]
         assert client.post(rota, json=DESTINO).json() == envio
         assert client.get(rota).json() == [envio]
-        assert len(chamadas) == 1
+        assert twilio_request.await_count == 1
 
 
 @pytest.mark.parametrize("cenario,status", [
@@ -170,14 +170,12 @@ def test_reserva_simultanea_e_nova_execucao_legitima(tmp_path):
             engine.dispose()
 
 
-def test_erro_persistencia_apos_aceite_nao_permite_segundo_envio(tmp_path, monkeypatch):
-    chamadas = []
+def test_erro_persistencia_apos_aceite_nao_permite_segundo_envio(tmp_path, monkeypatch, twilio_request):
 
     def handler(request):
         if request.url.host == "olinda.bcb.gov.br":
             return httpx.Response(200, json=BCB_PAYLOAD)
-        chamadas.append(request)
-        return httpx.Response(200, json={"messages": [{"id": "wamid.fixture"}]})
+        pytest.fail("httpx deve acessar somente o BCB")
 
     def falhar(*args):
         raise PersistenciaError("Falha de persistência simulada")
@@ -188,7 +186,7 @@ def test_erro_persistencia_apos_aceite_nao_permite_segundo_envio(tmp_path, monke
         monkeypatch.setattr(SQLiteEnvioRepository, "finalizar_envio", falhar)
         assert client.post(rota, json=DESTINO).status_code == 503
         assert client.post(rota, json=DESTINO).json()["status"] == "ENVIANDO"
-        assert len(chamadas) == 1
+        assert twilio_request.await_count == 1
 
 
 def test_whatsapp_nao_configurado_fica_rastreavel(tmp_path):
@@ -215,16 +213,13 @@ def test_reserva_de_envio_falha_antes_de_chamar_provedor(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(os.getenv("RUN_BROWSER_TESTS") != "1", reason="Chromium opcional para testar a interface")
-def test_interface_consulta_preview_envio_e_historico(tmp_path):
+def test_interface_consulta_preview_envio_e_historico(tmp_path, twilio_request):
     from playwright.sync_api import expect, sync_playwright
-
-    enviados = []
 
     def handler(request):
         if request.url.host == "olinda.bcb.gov.br":
             return httpx.Response(200, json=BCB_PAYLOAD)
-        enviados.append(request)
-        return httpx.Response(200, json={"messages": [{"id": "wamid.ui-fixture"}]})
+        pytest.fail("httpx deve acessar somente o BCB")
 
     with TestClient(create_app(settings(tmp_path), http_transport=httpx.MockTransport(handler))) as client:
         with sync_playwright() as playwright:
@@ -248,54 +243,93 @@ def test_interface_consulta_preview_envio_e_historico(tmp_path):
                 page.get_by_label("Período", exact=True).fill("2026-06")
                 page.get_by_role("button", name="Consultar Banco Central").click()
                 expect(page.locator("#mensagem")).to_contain_text("5.558.340")
-                assert not enviados
+                twilio_request.assert_not_awaited()
                 expect(page.get_by_role("button", name="Enviar WhatsApp")).to_be_disabled()
                 page.get_by_label("WhatsApp do destinatário").fill("99999-9999")
                 expect(page.locator("#telefone-validacao")).to_contain_text("Informe um número")
                 expect(page.get_by_role("button", name="Enviar WhatsApp")).to_be_disabled()
-                assert not enviados
+                twilio_request.assert_not_awaited()
                 page.get_by_label("WhatsApp do destinatário").fill("(86) 99999-9999")
                 expect(page.locator("#telefone-validacao")).to_contain_text("+5586999999999")
                 page.get_by_role("button", name="Enviar WhatsApp").click()
                 expect(page.locator("#envio-estado")).to_contain_text("Mensagem aceita")
                 expect(page.locator("#envio-historico")).to_contain_text("***9999")
                 expect(page.get_by_role("button", name="Enviar WhatsApp")).to_be_disabled()
-                assert json.loads(enviados[0].content)["to"] == "5586999999999"
+                assert twilio_request.call_args.kwargs["data"]["To"] == "whatsapp:+5586999999999"
                 page.reload()
                 page.get_by_role("button", name="Ver execução").first.click()
                 expect(page.locator("#envio-historico")).to_contain_text("Mensagem aceita")
                 expect(page.get_by_role("button", name="Enviar WhatsApp")).to_be_disabled()
-                assert len(enviados) == 1
+                assert twilio_request.await_count == 1
             finally:
                 browser.close()
 
 
-def test_template_integrado_telefone_brasileiro_e_segredo_nao_exposto(tmp_path):
-    config = replace(settings(tmp_path), whatsapp_template_name="panorama_teste")
-    chamadas = []
-
-    def handler(request):
-        if request.url.host == "olinda.bcb.gov.br":
-            return httpx.Response(200, json=BCB_PAYLOAD)
-        chamadas.append(json.loads(request.content))
-        return httpx.Response(200, json={"messages": [{"id": "wamid.template"}]})
-
-    with TestClient(create_app(config, http_transport=httpx.MockTransport(handler))) as client:
+def test_twilio_telefone_brasileiro_e_segredo_nao_exposto(tmp_path, twilio_request):
+    config = settings(tmp_path)
+    with TestClient(create_app(config, http_transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json=BCB_PAYLOAD)
+    ))) as client:
         pagina = client.get("/").text
-        assert "modelo aprovado" in pagina
-        assert config.whatsapp_token not in pagina
+        assert config.twilio_auth_token not in pagina
         consulta = client.post("/api/consultas/mercado", json=ENTRADA).json()
         rota = f"/api/consultas/{consulta['id']}/envios"
         assert client.post(rota, json={"destinatario": "99999-9999"}).status_code == 422
-        assert not chamadas
+        twilio_request.assert_not_awaited()
         response = client.post(rota, json={"destinatario": "(86) 99999-9999"})
         envio = response.json()
         assert envio["status"] == "ACEITO"
         assert envio["destinatario"] == "5586999999999"
         assert envio["mensagem"] == consulta["mensagem_gerada"]
-        assert chamadas[0]["template"]["components"][0]["parameters"][0]["text"] == " ".join(envio["mensagem"].split())
-        assert chamadas[0]["to"] == envio["destinatario"]
+        assert twilio_request.call_args.kwargs["data"]["To"] == "whatsapp:+5586999999999"
         assert client.get(rota).json() == [envio]
-        assert config.whatsapp_token not in response.text
+        assert config.twilio_auth_token not in response.text
+        assert config.twilio_account_sid not in response.text
         assert client.post(rota, json={"destinatario": "+55 86 99999-9999"}).json() == envio
-        assert len(chamadas) == 1
+        assert twilio_request.await_count == 1
+
+
+def test_falha_retornada_pela_twilio_preserva_sid_e_status(tmp_path, twilio_request):
+    twilio_request.side_effect = None
+    twilio_request.return_value = TwilioResponse(201, json.dumps({
+        "sid": "SM" + "2" * 32, "status": "failed", "to": "whatsapp:+15550000001",
+        "error_code": 63015, "error_message": "detalhe privado",
+    }))
+    with TestClient(create_app(settings(tmp_path), http_transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json=BCB_PAYLOAD)
+    ))) as client:
+        consulta = client.post("/api/consultas/mercado", json=ENTRADA).json()
+        rota = f"/api/consultas/{consulta['id']}/envios"
+        envio = client.post(rota, json=DESTINO).json()
+        assert envio["status"] == "ERRO"
+        assert envio["provedor_status"] == "failed"
+        assert envio["provedor_id"] == "SM" + "2" * 32
+        assert "privado" not in envio["erro"]
+        assert client.get(rota).json() == [envio]
+        assert client.post(rota, json=DESTINO).json() == envio
+        assert twilio_request.await_count == 1
+
+
+def test_migracao_preserva_envio_anterior_e_pode_reiniciar(tmp_path):
+    config = settings(tmp_path)
+    engine = create_engine(f"sqlite:///{config.database_path}")
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("""CREATE TABLE envios (
+                id VARCHAR(36) PRIMARY KEY, execucao_id VARCHAR(36), destinatario VARCHAR(15),
+                mensagem VARCHAR, status VARCHAR, data_hora FLOAT, finalizado_em FLOAT,
+                provedor_id VARCHAR, erro VARCHAR, tentativas INTEGER,
+                UNIQUE (execucao_id, destinatario))"""))
+            connection.execute(text("""INSERT INTO envios
+                (id, execucao_id, destinatario, mensagem, status, data_hora, provedor_id, tentativas)
+                VALUES ('antigo', 'consulta-antiga', '15550000001', 'Mensagem anterior', 'ACEITO', 1, 'id-anterior', 1)"""))
+        for _ in range(2):
+            with TestClient(create_app(config)) as client:
+                envio = client.get("/api/consultas/consulta-antiga/envios").json()[0]
+                assert envio["id"] == "antigo"
+                assert envio["mensagem"] == "Mensagem anterior"
+                assert envio["provedor_id"] == "id-anterior"
+                assert envio["provedor_status"] is None
+                assert client.post("/api/consultas/consulta-antiga/envios", json=DESTINO).json() == envio
+    finally:
+        engine.dispose()

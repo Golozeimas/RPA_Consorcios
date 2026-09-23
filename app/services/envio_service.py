@@ -20,9 +20,11 @@ class EnvioService:
             return envio
         logger.info("envio_inicio id=%s execucao=%s", envio.id, execucao_id)
         status, provedor_id, erro = StatusEnvio.INCERTO, None, None
+        provedor_status = None
         try:
-            provedor_id = await self.gateway.enviar(envio.destinatario, envio.mensagem)
-            status = StatusEnvio.ACEITO
+            confirmacao = await self.gateway.enviar(envio.destinatario, envio.mensagem)
+            provedor_id, provedor_status = confirmacao.provedor_id, confirmacao.provedor_status
+            status, erro = confirmacao.status, confirmacao.erro
         except asyncio.CancelledError:
             self.repository.finalizar_envio(envio.id, StatusEnvio.INCERTO, None, "Envio interrompido; confirme no provedor antes de repetir.")
             raise
@@ -34,7 +36,7 @@ class EnvioService:
             # Exceções de transporte podem carregar dados privados: registrar só categoria.
             logger.error("envio_inesperado id=%s categoria=%s", envio.id, type(exc).__name__)
             erro = "Não foi possível confirmar o envio. Verifique o provedor antes de repetir."
-        final = self.repository.finalizar_envio(envio.id, status, provedor_id, erro)
+        final = self.repository.finalizar_envio(envio.id, status, provedor_id, erro, provedor_status)
         logger.info("envio_finalizado id=%s status=%s", envio.id, final.status)
         return final
 

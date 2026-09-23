@@ -12,8 +12,7 @@ from app.services.envio_service import EnvioService
 from app.schemas.envio import EnvioInput, EnvioResponse
 
 
-def criar_router(service: ConsultaService, mercado_service: ConsultaService, envio_service: EnvioService,
-                 usa_template: bool = False) -> APIRouter:
+def criar_router(service: ConsultaService, mercado_service: ConsultaService, envio_service: EnvioService) -> APIRouter:
     router = APIRouter()
     templates = Jinja2Templates(directory=Path(__file__).resolve().parents[2] / "templates")
 
@@ -23,7 +22,6 @@ def criar_router(service: ConsultaService, mercado_service: ConsultaService, env
             "fonte": FONTE, "dataset": DATASET, "metrica": METRICA,
             "segmentos_principais": SEGMENTOS_PRINCIPAIS_BCB,
             "subsegmentos": SUBSEGMENTOS_BCB,
-            "usa_template": usa_template,
         })
 
     @router.post("/api/consultas", response_model=ExecucaoResponse)

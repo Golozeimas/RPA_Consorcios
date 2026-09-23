@@ -16,5 +16,6 @@ class EnvioModel(Base):
     data_hora: Mapped[float] = mapped_column(Float)
     finalizado_em: Mapped[float | None] = mapped_column(Float, nullable=True)
     provedor_id: Mapped[str | None]
+    provedor_status: Mapped[str | None] = mapped_column(String(40), nullable=True)
     erro: Mapped[str | None]
     tentativas: Mapped[int] = mapped_column(default=1)

@@ -15,7 +15,7 @@ from app.core.config import ROOT, Settings
 from app.domain import PersistenciaError
 from app.models.execucao import Base
 from app.repositories.execucao_repository import SQLiteExecutionRepository
-from app.repositories.envio_repository import SQLiteEnvioRepository
+from app.repositories.envio_repository import SQLiteEnvioRepository, atualizar_schema_envios
 from app.services.bcb_service import BCBService
 from app.services.bcb_mercado_service import BCBMercadoService
 from app.services.consulta_service import ConsultaService
@@ -49,9 +49,8 @@ def create_app(
     )
     envio = EnvioService(
         message_gateway or WhatsAppClient(
-            http_client, settings.whatsapp_token, settings.whatsapp_phone_number_id,
-            settings.whatsapp_api_version, settings.http_timeout_seconds,
-            settings.whatsapp_template_name, settings.whatsapp_template_language,
+            settings.twilio_account_sid, settings.twilio_auth_token,
+            settings.twilio_whatsapp_from, settings.http_timeout_seconds,
         ),
         SQLiteEnvioRepository(engine, settings.http_timeout_seconds * 4 + 30),
     )
@@ -60,9 +59,11 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
         logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("twilio").setLevel(logging.WARNING)
         try:
             settings.database_path.parent.mkdir(parents=True, exist_ok=True)
             Base.metadata.create_all(engine)
+            atualizar_schema_envios(engine)
             logger.info("aplicacao_iniciada")
             yield
         finally:
@@ -70,7 +71,7 @@ def create_app(
             engine.dispose()
 
     app = FastAPI(title="Consulta pública BCB — Consórcios", lifespan=lifespan)
-    app.include_router(criar_router(service, mercado, envio, bool(settings.whatsapp_template_name)))
+    app.include_router(criar_router(service, mercado, envio))
     app.mount("/static", StaticFiles(directory=ROOT / "app" / "static"), name="static")
 
     @app.exception_handler(PersistenciaError)

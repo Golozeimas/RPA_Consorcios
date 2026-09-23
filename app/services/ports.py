@@ -2,7 +2,7 @@ from datetime import datetime
 from dataclasses import dataclass
 from typing import Protocol
 
-from app.domain import Consulta, ConsultaMercado, ConsorcioResultado, Envio, Execucao, PanoramaResultado, Resultado, Status, StatusEnvio
+from app.domain import ConfirmacaoEnvio, Consulta, ConsultaMercado, ConsorcioResultado, Envio, Execucao, PanoramaResultado, Resultado, Status, StatusEnvio
 
 MAXIMO_REGISTROS_BCB = 200
 
@@ -41,12 +41,13 @@ class ExecutionRepository(Protocol):
 
 
 class MessageGateway(Protocol):
-    async def enviar(self, destinatario: str, mensagem: str) -> str: ...
+    async def enviar(self, destinatario: str, mensagem: str) -> ConfirmacaoEnvio: ...
 
 
 class EnvioRepository(Protocol):
     def reservar_envio(self, execucao_id: str, destinatario: str) -> tuple[Envio, bool]: ...
 
-    def finalizar_envio(self, id: str, status: StatusEnvio, provedor_id: str | None, erro: str | None) -> Envio: ...
+    def finalizar_envio(self, id: str, status: StatusEnvio, provedor_id: str | None, erro: str | None,
+                       provedor_status: str | None = None) -> Envio: ...
 
     def listar_envios(self, execucao_id: str) -> list[Envio]: ...

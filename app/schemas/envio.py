@@ -22,4 +22,5 @@ class EnvioResponse(BaseModel):
     status: StatusEnvio
     data_hora: AwareDatetime
     provedor_id: str | None
+    provedor_status: str | None = None
     erro: str | None

@@ -98,6 +98,14 @@ def normalizar_destinatario(valor: str) -> str:
 
 
 @dataclass(frozen=True)
+class ConfirmacaoEnvio:
+    provedor_id: str
+    provedor_status: str
+    status: StatusEnvio = StatusEnvio.ACEITO
+    erro: str | None = None
+
+
+@dataclass(frozen=True)
 class Envio:
     id: str
     execucao_id: str
@@ -106,6 +114,7 @@ class Envio:
     status: StatusEnvio
     data_hora: datetime
     provedor_id: str | None = None
+    provedor_status: str | None = None
     erro: str | None = None
 
 

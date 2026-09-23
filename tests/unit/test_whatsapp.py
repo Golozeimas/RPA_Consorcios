@@ -1,11 +1,11 @@
 import asyncio
 import json
 
-import httpx
+from twilio.http.response import Response
 import pytest
 
 from app.core.config import Settings
-from app.domain import EnvioError, normalizar_destinatario
+from app.domain import EnvioError, EnvioIncertoError, StatusEnvio, normalizar_destinatario
 from app.integrations.whatsapp_client import WhatsAppClient
 
 
@@ -32,64 +32,73 @@ def test_telefone_invalido(telefone):
         normalizar_destinatario(telefone)
 
 
-def test_template_com_mensagem_dinamica_sem_fallback_para_texto():
-    async def executar():
-        def handler(request):
-            payload = json.loads(request.content)
-            assert payload["to"] == "5586999999999"
-            assert payload["type"] == "template"
-            assert "text" not in payload
-            assert payload["template"] == {
-                "name": "panorama_teste", "language": {"code": "pt_BR"},
-                "components": [{"type": "body", "parameters": [{
-                    "type": "text", "text": "Panorama Cotas ativas: 1.234 Crédito médio: R$ 50.000,00",
-                }]}],
-            }
-            return httpx.Response(200, json={"messages": [{"id": "wamid.teste"}]})
-
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            gateway = WhatsAppClient(client, "ficticio", "123", "v23.0", template_name="panorama_teste")
-            assert await gateway.enviar("5586999999999", "Panorama\n\nCotas ativas: 1.234\nCrédito médio: R$ 50.000,00") == "wamid.teste"
-    asyncio.run(executar())
+def gateway():
+    return WhatsAppClient("AC" + "0" * 32, "ficticio", "whatsapp:+15550000002")
 
 
-def test_template_longo_falha_sem_chamar_meta():
-    async def executar():
-        def handler(request):
-            pytest.fail("A mensagem inválida não deve ser enviada")
+@pytest.mark.parametrize("provider_status,status", [
+    ("queued", StatusEnvio.ACEITO), ("sent", StatusEnvio.ACEITO),
+    ("failed", StatusEnvio.ERRO), ("undelivered", StatusEnvio.ERRO),
+    ("canceled", StatusEnvio.ERRO), ("novo_estado", StatusEnvio.INCERTO),
+])
+@pytest.mark.parametrize("prefixo", ["SM", "MM"])
+def test_status_retornado_pelo_sdk(provider_status, status, prefixo, twilio_request):
+    twilio_request.side_effect = None
+    twilio_request.return_value = Response(201, json.dumps({
+        "sid": prefixo + "1" * 32, "status": provider_status, "to": "whatsapp:+5586999999999",
+        "error_message": "detalhe privado", "error_code": None,
+    }))
+    resultado = asyncio.run(gateway().enviar("5586999999999", "Panorama de teste"))
+    assert resultado.provedor_id == prefixo + "1" * 32
+    assert resultado.provedor_status == provider_status
+    assert resultado.status == status
+    assert "privado" not in (resultado.erro or "")
+    assert twilio_request.await_count == 1
 
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            gateway = WhatsAppClient(client, "ficticio", "123", "v23.0", template_name="panorama_teste")
-            with pytest.raises(EnvioError, match="não cabe"):
-                await gateway.enviar("5586999999999", "x" * 1025)
-    asyncio.run(executar())
+
+@pytest.mark.parametrize("payload", [
+    {}, {"sid": "invalido", "status": "queued", "to": "whatsapp:+5586999999999"},
+    {"sid": "SM" + "1" * 32, "status": "queued", "to": "whatsapp:+15550000003"},
+])
+def test_resposta_invalida_ou_destino_divergente(payload, twilio_request):
+    twilio_request.side_effect = None
+    twilio_request.return_value = Response(201, json.dumps(payload))
+    with pytest.raises(EnvioIncertoError):
+        asyncio.run(gateway().enviar("5586999999999", "Teste"))
+    assert twilio_request.await_count == 1
 
 
-def test_template_rejeitado_nao_dispara_texto_como_fallback():
-    async def executar():
-        chamadas = []
+@pytest.mark.parametrize("mensagem", ["", " ", "x" * 1601])
+def test_mensagem_invalida_nao_chama_twilio(mensagem, twilio_request):
+    with pytest.raises(EnvioError):
+        asyncio.run(gateway().enviar("5586999999999", mensagem))
+    twilio_request.assert_not_awaited()
 
-        def handler(request):
-            chamadas.append(json.loads(request.content))
-            return httpx.Response(400, json={"error": {"message": "detalhe privado do template"}})
 
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            gateway = WhatsAppClient(client, "ficticio", "123", "v23.0", template_name="panorama_teste")
-            with pytest.raises(EnvioError) as erro:
-                await gateway.enviar("5586999999999", "Mensagem dinâmica de teste")
-            assert "privado" not in str(erro.value)
-            assert len(chamadas) == 1
-            assert chamadas[0]["type"] == "template"
-    asyncio.run(executar())
+@pytest.mark.parametrize("falha", [False, True])
+def test_sessao_sdk_fecha_em_sucesso_e_falha(monkeypatch, twilio_request, falha):
+    from app.integrations import whatsapp_client
+    real_client = whatsapp_client.Client
+    transportes = []
+
+    def criar_client(*args, **kwargs):
+        transportes.append(kwargs["http_client"])
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr(whatsapp_client, "Client", criar_client)
+    if falha:
+        twilio_request.side_effect = TimeoutError("simulado")
+        with pytest.raises(EnvioIncertoError):
+            asyncio.run(gateway().enviar("5586999999999", "Teste"))
+    else:
+        asyncio.run(gateway().enviar("5586999999999", "Teste"))
+    assert transportes[0].session.closed
 
 
 @pytest.mark.parametrize("campos", [
-    {"whatsapp_token": "ficticio"},
-    {"whatsapp_template_name": "panorama"},
-    {"whatsapp_token": "ficticio", "whatsapp_phone_number_id": "123", "whatsapp_api_version": "v23.0",
-     "whatsapp_template_name": "nome inválido"},
-    {"whatsapp_token": "ficticio", "whatsapp_phone_number_id": "123", "whatsapp_api_version": "v23.0",
-     "whatsapp_template_name": "panorama", "whatsapp_template_language": ""},
+    {"twilio_auth_token": "ficticio"},
+    {"twilio_account_sid": "invalido", "twilio_auth_token": "ficticio", "twilio_whatsapp_from": "whatsapp:+15550000002"},
+    {"twilio_account_sid": "AC" + "0" * 32, "twilio_auth_token": "ficticio", "twilio_whatsapp_from": "15550000002"},
 ])
 def test_configuracao_incompleta_ou_invalida(campos):
     with pytest.raises(ValueError):
