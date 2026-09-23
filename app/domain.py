@@ -14,7 +14,10 @@ FONTE = "Banco Central do Brasil"
 DATASET = "Dados Agregados do Segmento de Consórcios"
 METRICA = "Cotas ativas - Total"
 METRICA_ID = "10"
-SEGMENTOS_BCB = ("Imóveis", "Veículos Pesados", "Automóveis", "Motocicletas", "Serviços")
+SEGMENTOS_BCB = (
+    "Automóveis", "Motocicletas", "Imóveis", "Veículos Pesados",
+    "Outros bens móveis duráveis", "Serviços", "Total",
+)
 UFS_BCB = frozenset({
     "AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", "MA", "MG", "MS", "MT",
     "PA", "PB", "PE", "PI", "PR", "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO",
@@ -131,7 +134,7 @@ class Execucao:
     data_hora: datetime
     status: Status
     hash_consulta: str
-    dados_extraidos: Resultado | ConsorcioResultado | None = None
+    dados_extraidos: Resultado | ConsorcioResultado | PanoramaResultado | None = None
     erro: str | None = None
     duplicada_de: str | None = None
     mensagem_gerada: str | None = None
@@ -139,37 +142,25 @@ class Execucao:
 
 @dataclass(frozen=True)
 class ConsultaMercado:
-    administradora: str
+    segmento: str
     periodo: str | None = None
-    segmento: str | None = None
-    uf: str | None = None
 
     def __post_init__(self) -> None:
-        administradora = " ".join(self.administradora.split())
-        if not administradora or len(administradora) > 160:
-            raise ValueError("Informe uma administradora válida.")
-        object.__setattr__(self, "administradora", administradora)
+        if self.segmento not in SEGMENTOS_BCB:
+            raise ValueError("Selecione um segmento publicado pelo BCB.")
         if self.periodo is not None:
             object.__setattr__(self, "periodo", Consulta(self.periodo).periodo)
-        if self.segmento is not None and self.segmento not in SEGMENTOS_BCB:
-            raise ValueError("Segmento não suportado pelo conjunto de dados.")
-        if self.uf is not None and self.uf not in UFS_BCB:
-            raise ValueError("UF não suportada pelo conjunto de dados.")
-        if self.segmento is not None and self.uf is not None:
-            raise ValueError("O BCB não oferece cruzamento de segmento e UF.")
 
     @property
     def parametros(self) -> dict[str, str]:
         return {
-            "administradora_solicitada": self.administradora,
             "periodo": self.periodo or "mais_recente",
-            "segmento": self.segmento or "",
-            "uf": self.uf or "",
+            "segmento": self.segmento,
         }
 
     @property
     def hash_consulta(self) -> str:
-        identidade = {"fonte": FONTE, "consulta": "mercado_consorcios", **self.parametros}
+        identidade = {"fonte": FONTE, "consulta": "panorama_consorcios", **self.parametros}
         return sha256(json.dumps(identidade, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
@@ -185,6 +176,21 @@ class ConsorcioResultado:
     segmento: str | None
     uf: str | None
     abrangencia: str
+    data_consulta: datetime
+    fonte: str
+    source_url: str
+    campos_indisponiveis: list[str]
+
+
+@dataclass(frozen=True)
+class PanoramaResultado:
+    segmento: str
+    periodo_referencia: str
+    cotas_ativas: int
+    credito_medio: Decimal | None
+    prazo_medio: Decimal | None
+    taxa_administracao_media: Decimal | None
+    contemplacoes: int | None
     data_consulta: datetime
     fonte: str
     source_url: str

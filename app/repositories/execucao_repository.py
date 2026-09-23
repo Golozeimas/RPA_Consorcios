@@ -7,17 +7,32 @@ from sqlalchemy import Engine, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.domain import Consulta, ConsultaMercado, ConsorcioResultado, DATASET, Execucao, FONTE, PersistenciaError, Resultado, Status
+from app.domain import Consulta, ConsultaMercado, ConsorcioResultado, DATASET, Execucao, FONTE, PanoramaResultado, PersistenciaError, Resultado, Status
 from app.models.execucao import ExecucaoModel
 
 logger = logging.getLogger(__name__)
 
 
 def _resultado_json(
-    resultado: Resultado | ConsorcioResultado | None, mensagem_gerada: str | None
+    resultado: Resultado | ConsorcioResultado | PanoramaResultado | None, mensagem_gerada: str | None
 ) -> dict[str, object] | None:
     if resultado is None:
         return None
+    if isinstance(resultado, PanoramaResultado):
+        return {
+            "segmento": resultado.segmento,
+            "periodo_referencia": resultado.periodo_referencia,
+            "cotas_ativas": resultado.cotas_ativas,
+            "credito_medio": str(resultado.credito_medio) if resultado.credito_medio is not None else None,
+            "prazo_medio": str(resultado.prazo_medio) if resultado.prazo_medio is not None else None,
+            "taxa_administracao_media": str(resultado.taxa_administracao_media) if resultado.taxa_administracao_media is not None else None,
+            "contemplacoes": resultado.contemplacoes,
+            "data_consulta": resultado.data_consulta.isoformat(),
+            "fonte": resultado.fonte,
+            "source_url": resultado.source_url,
+            "campos_indisponiveis": resultado.campos_indisponiveis,
+            "_mensagem_gerada": mensagem_gerada,
+        }
     if isinstance(resultado, ConsorcioResultado):
         return {
             "administradora": resultado.administradora,
@@ -49,7 +64,19 @@ def _entidade(model: ExecucaoModel) -> Execucao:
     if model.dados_extraidos is not None:
         registro = model.dados_extraidos
         mensagem_gerada = registro.get("_mensagem_gerada")
-        if "periodo_referencia" in registro:
+        if "credito_medio" in registro:
+            resultado = PanoramaResultado(
+                segmento=registro["segmento"], periodo_referencia=registro["periodo_referencia"],
+                cotas_ativas=registro["cotas_ativas"],
+                credito_medio=Decimal(registro["credito_medio"]) if registro["credito_medio"] is not None else None,
+                prazo_medio=Decimal(registro["prazo_medio"]) if registro["prazo_medio"] is not None else None,
+                taxa_administracao_media=Decimal(registro["taxa_administracao_media"]) if registro["taxa_administracao_media"] is not None else None,
+                contemplacoes=registro["contemplacoes"],
+                data_consulta=datetime.fromisoformat(registro["data_consulta"]),
+                fonte=registro["fonte"], source_url=registro["source_url"],
+                campos_indisponiveis=registro["campos_indisponiveis"],
+            )
+        elif "periodo_referencia" in registro:
             resultado = ConsorcioResultado(
                 administradora=registro["administradora"],
                 periodo_referencia=registro["periodo_referencia"],
@@ -107,7 +134,7 @@ class SQLiteExecutionRepository:
                 ).order_by(ExecucaoModel.finalizado_em.desc()).limit(1))
                 model = ExecucaoModel(
                     id=str(uuid4()), fonte=FONTE,
-                    tipo_consulta="mercado_consorcios" if isinstance(consulta, ConsultaMercado) else DATASET,
+                    tipo_consulta="panorama_consorcios" if isinstance(consulta, ConsultaMercado) else DATASET,
                     parametros=consulta.parametros, data_hora=agora.timestamp(),
                     status=Status.DUPLICADA if recente else Status.PROCESSANDO,
                     hash_consulta=consulta.hash_consulta,
@@ -124,7 +151,7 @@ class SQLiteExecutionRepository:
             raise PersistenciaError("Não foi possível registrar a consulta no banco de dados.") from exc
 
     def finalizar(
-        self, id: str, status: Status, resultado: Resultado | ConsorcioResultado | None,
+        self, id: str, status: Status, resultado: Resultado | ConsorcioResultado | PanoramaResultado | None,
         erro: str | None, mensagem_gerada: str | None = None,
     ) -> Execucao:
         try:

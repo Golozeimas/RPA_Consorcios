@@ -4,7 +4,7 @@ from typing import Literal
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 
 from app.domain import Consulta
-from app.schemas.consorcios import ConsorcioConsultaResult
+from app.schemas.consorcios import ConsorcioConsultaResult, PanoramaConsultaResult
 
 
 class ConsultaInput(BaseModel):
@@ -61,7 +61,7 @@ class ExecucaoResponse(BaseModel):
     data_hora: AwareDatetime
     status: str
     hash_consulta: str
-    dados_extraidos: ResultadoConsultaBCB | ConsorcioConsultaResult | None
+    dados_extraidos: ResultadoConsultaBCB | PanoramaConsultaResult | ConsorcioConsultaResult | None
     erro: str | None
     duplicada_de: str | None
     mensagem_gerada: str | None = None

@@ -1,25 +1,35 @@
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.domain import ConsultaMercado
 
 
 class ConsultaMercadoInput(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-    administradora: str = Field(min_length=1, max_length=160)
+    segmento: str = Field(min_length=1)
     periodo: str | None = None
-    segmento: Literal["Imóveis", "Veículos Pesados", "Automóveis", "Motocicletas", "Serviços"] | None = None
-    uf: Literal[
-        "AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", "MA", "MG", "MS", "MT",
-        "PA", "PB", "PE", "PI", "PR", "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO",
-    ] | None = None
 
     @model_validator(mode="after")
     def validar_consulta(self) -> "ConsultaMercadoInput":
         ConsultaMercado(**self.model_dump())
         return self
+
+
+class PanoramaConsultaResult(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    segmento: str = Field(min_length=1)
+    periodo_referencia: str = Field(pattern=r"^[1-9][0-9]{3}-(03|06|09|12)$")
+    cotas_ativas: int = Field(ge=0)
+    credito_medio: Decimal | None = Field(ge=0, allow_inf_nan=False)
+    prazo_medio: Decimal | None = Field(ge=0, allow_inf_nan=False)
+    taxa_administracao_media: Decimal | None = Field(ge=0, allow_inf_nan=False)
+    contemplacoes: int | None = Field(ge=0)
+    data_consulta: AwareDatetime
+    fonte: Literal["Banco Central do Brasil"]
+    source_url: str = Field(min_length=1)
+    campos_indisponiveis: list[str]
 
 
 class ConsorcioConsultaResult(BaseModel):

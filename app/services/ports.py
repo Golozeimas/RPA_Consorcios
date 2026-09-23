@@ -2,7 +2,7 @@ from datetime import datetime
 from dataclasses import dataclass
 from typing import Protocol
 
-from app.domain import Consulta, ConsultaMercado, ConsorcioResultado, Envio, Execucao, Resultado, Status, StatusEnvio
+from app.domain import Consulta, ConsultaMercado, ConsorcioResultado, Envio, Execucao, PanoramaResultado, Resultado, Status, StatusEnvio
 
 MAXIMO_REGISTROS_BCB = 200
 
@@ -24,14 +24,14 @@ class MetricasBCBGateway(Protocol):
 class PublicQueryGateway(Protocol):
     async def consultar(
         self, consulta: Consulta | ConsultaMercado
-    ) -> Resultado | ConsorcioResultado | None: ...
+    ) -> Resultado | ConsorcioResultado | PanoramaResultado | None: ...
 
 
 class ExecutionRepository(Protocol):
     def reservar(self, consulta: Consulta | ConsultaMercado, agora: datetime) -> Execucao: ...
 
     def finalizar(
-        self, id: str, status: Status, resultado: Resultado | ConsorcioResultado | None,
+        self, id: str, status: Status, resultado: Resultado | ConsorcioResultado | PanoramaResultado | None,
         erro: str | None, mensagem_gerada: str | None = None,
     ) -> Execucao: ...
 
