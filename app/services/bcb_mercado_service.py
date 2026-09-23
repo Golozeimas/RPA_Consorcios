@@ -34,6 +34,11 @@ CATALOGO: dict[str, MetricaOficial] = {
     "14": MetricaOficial("Cotas ativas - Motocicletas", "Cotas ativas", "mil"),
     "15": MetricaOficial("Cotas Ativas - Outros bens móveis duráveis (eletroeletrônicos, eletrodomésticos, móveis e outros)", "Cotas ativas", "mil"),
     "16": MetricaOficial("Cotas ativas - Serviços", "Cotas ativas", "mil"),
+    "17": MetricaOficial("Cotas ativas - Ônibus e Micro-ônibus (cód. 21)", "Cotas ativas", "mil"),
+    "18": MetricaOficial("Cotas Ativas - Caminhões e Caminhões-Tratores (cód. 22)", "Cotas ativas", "mil"),
+    "19": MetricaOficial("Cotas ativas - Equipamentos Rodoviários e Agrícolas (cód. 23)", "Cotas ativas", "mil"),
+    "20": MetricaOficial("Cotas ativas - Máquinas Agrícolas (cód. 24)", "Cotas ativas", "mil"),
+    "21": MetricaOficial("Cotas Ativas - Embarcações e Aeronaves (cód. 25)", "Cotas ativas", "mil"),
     "28": MetricaOficial("Cotas ativas contempladas no últimos 12 meses - Total", "Ativos Contemplados", "mil"),
     "31": MetricaOficial("Cotas ativas contempladas nos últimos 12 meses - Imóveis", "Ativos Contemplados", "mil"),
     "34": MetricaOficial("Cotas ativas contempladas nos últimos 12 meses - Automóveis", "Ativos Contemplados", "mil"),
@@ -68,8 +73,13 @@ METRICAS_POR_SEGMENTO: dict[str, dict[str, str]] = {
     "Veículos Pesados": {"cotas_ativas": "12", "credito_medio": "87", "prazo_medio": "94", "taxa_administracao_media": "80"},
     "Automóveis": {"cotas_ativas": "13", "credito_medio": "88", "prazo_medio": "95", "taxa_administracao_media": "81", "contemplacoes": "34"},
     "Motocicletas": {"cotas_ativas": "14", "credito_medio": "89", "prazo_medio": "96", "taxa_administracao_media": "82"},
-    "Outros bens móveis duráveis": {"cotas_ativas": "15", "credito_medio": "90", "prazo_medio": "97", "taxa_administracao_media": "83"},
+    "Outros bens móveis duráveis (eletroeletrônicos, eletrodomésticos, móveis e outros)": {"cotas_ativas": "15", "credito_medio": "90", "prazo_medio": "97", "taxa_administracao_media": "83"},
     "Serviços": {"cotas_ativas": "16", "credito_medio": "91", "prazo_medio": "98", "taxa_administracao_media": "84"},
+    "Ônibus e Micro-ônibus (cód. 21)": {"cotas_ativas": "17"},
+    "Caminhões e Caminhões-Tratores (cód. 22)": {"cotas_ativas": "18"},
+    "Equipamentos Rodoviários e Agrícolas (cód. 23)": {"cotas_ativas": "19"},
+    "Máquinas Agrícolas (cód. 24)": {"cotas_ativas": "20"},
+    "Embarcações e Aeronaves (cód. 25)": {"cotas_ativas": "21"},
 }
 
 CAMPOS = ("cotas_ativas", "credito_medio", "prazo_medio", "taxa_administracao_media", "contemplacoes")

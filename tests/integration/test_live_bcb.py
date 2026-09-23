@@ -3,10 +3,13 @@
 import os
 
 from fastapi.testclient import TestClient
+import httpx
 import pytest
 
 from app.core.config import Settings
+from app.domain import SEGMENTOS_BCB
 from app.main import create_app
+from app.services.bcb_mercado_service import CATALOGO, METRICAS_POR_SEGMENTO
 
 
 @pytest.mark.skipif(os.getenv("RUN_LIVE_BCB") != "1", reason="Ative RUN_LIVE_BCB=1 para consultar a fonte real")
@@ -29,3 +32,18 @@ def test_consulta_real_sem_envio(tmp_path):
         assert "administradora" not in resultado
         assert "Panorama do mercado" in execucao["mensagem_gerada"]
         assert client.get(f"/api/consultas/{execucao['id']}").json() == execucao
+
+
+@pytest.mark.skipif(os.getenv("RUN_LIVE_BCB") != "1", reason="Ative RUN_LIVE_BCB=1 para conferir o catálogo oficial")
+def test_segmentos_correspondem_ao_catalogo_oficial():
+    url = "https://olinda.bcb.gov.br/olinda/servico/PANORAMA_DE_CONSORCIOS/versao/v1/odata/CadastroDeMetricas()"
+    resposta = httpx.get(url, params={"$format": "json", "$top": 200}, timeout=30)
+    resposta.raise_for_status()
+    catalogo = {str(item["IdMetrica"]): item for item in resposta.json()["value"] if item["IdGrupo"] == 5}
+    ids = {mapeamento["cotas_ativas"] for mapeamento in METRICAS_POR_SEGMENTO.values()}
+    assert set(SEGMENTOS_BCB) == set(METRICAS_POR_SEGMENTO)
+    assert ids == set(catalogo)
+    for codigo in ids:
+        item = catalogo[codigo]
+        assert " ".join(item["Metrica"].split()) == CATALOGO[codigo].nome
+        assert item["Unidade"] == CATALOGO[codigo].unidade

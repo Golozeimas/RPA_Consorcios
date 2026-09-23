@@ -1,5 +1,44 @@
 # Consulta BCB selecionada
 
+## Panorama agregado atual
+
+Em 23/09/2026, os recursos oficiais `CadastroDeMetricas()` e
+`Metricas(DataBase=@DataBase)` foram consultados novamente. O catálogo tem 125
+métricas; o valor retornado inclui `DataBase` (AAAAMM), `IdMetrica` (texto),
+`Grupo`, `Metrica`, `Valor` e `Unidade`. O endpoint de valores aceita `@DataBase`
+inteiro. A aplicação solicita `$format=json` e `$top=200` e valida as métricas
+selecionadas por ID, nome, grupo e unidade.
+
+| Conceito | IDs oficiais: Total, Imóveis, Veículos Pesados, Automóveis, Motocicletas, Outros bens móveis duráveis, Serviços | Unidade / interpretação |
+| --- | --- | --- |
+| Cotas ativas | 10, 11, 12, 13, 14, 15, 16 | mil cotas → quantidade |
+| Crédito médio | 85, 86, 87, 88, 89, 90, 91 | R$ mil → reais; grupos constituídos nos últimos 12 meses |
+| Prazo médio | 92, 93, 94, 95, 96, 97, 98 | meses; ID 94 diz “no ano”, conforme o catálogo |
+| Taxa média de administração | 78, 79, 80, 81, 82, 83, 84 | %; grupos constituídos nos últimos 12 meses |
+| Contemplações de cotas ativas | 28, 31, —, 34, —, —, — | mil cotas → quantidade, últimos 12 meses |
+
+O grupo oficial `Cotas ativas` também inclui IDs 17–21: Ônibus e Micro-ônibus
+(cód. 21), Caminhões e Caminhões-Tratores (cód. 22), Equipamentos Rodoviários e
+Agrícolas (cód. 23), Máquinas Agrícolas (cód. 24) e Embarcações e Aeronaves
+(cód. 25). Essas cinco categorias são selecionáveis, mas apenas cotas ativas
+têm correspondência individual no catálogo; os outros indicadores ficam nulos
+e são omitidos da mensagem. `Total` é agregado do mercado, não segmento.
+
+O campo `segmento` é a categoria do catálogo selecionada na interface;
+`periodo_referencia` vem de `DataBase` da resposta, nunca da data da consulta.
+A métrica 37 (Motocicletas) registra unidade `mi`, ambígua para quantidade.
+A métrica 40 combina Outros Bens Móveis e Serviços; por isso não é atribuída a
+um deles. Outros segmentos sem contemplações específicas também ficam com
+`contemplacoes=null`. A mensagem omite indicadores ausentes. Cotas ativas são
+obrigatórias para um panorama significativo.
+
+Os registros salvos antes dessa mudança continuam disponíveis no formato
+histórico, inclusive os que continham administradora solicitada. Nenhuma nova
+consulta aceita ou persiste esse campo. O endpoint inicial de métrica 10 foi
+preservado para compatibilidade, mas a interface usa o panorama por segmento.
+
+## Investigação anterior
+
 ## Integração atual: HTTP/OData
 
 O Swagger oficial foi revalidado em 23/09/2026:

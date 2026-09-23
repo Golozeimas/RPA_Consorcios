@@ -53,20 +53,28 @@ sem dados. Resultado real observado para dezembro/2025: `12821.11 mil` (pode ser
 O endpoint inicial `POST /api/consultas` permanece compatível: consulta a métrica
 10 em um período obrigatório, agora usando o mesmo cliente HTTP oficial.
 
-A tela usa `POST /api/consultas/mercado`: requer o nome da administradora
-solicitada, aceita período, segmento ou UF opcionais e retorna métricas agregadas.
-O conjunto oficial **não permite filtrar por administradora**. Por isso o nome é
-registrado como entrada, enquanto `administradora` no resultado é `null` e aparece
-em `campos_indisponiveis`. A interface e a mensagem deixam claro que os valores
-não pertencem à empresa informada. Segmento e UF não podem ser combinados; o BCB
-não publica esse cruzamento. UF oferece somente cotas ativas por estado.
+A tela usa `POST /api/consultas/mercado`: seleciona um segmento publicado pelo
+BCB e, opcionalmente, um período de referência. Em branco, o período mais recente
+com cotas ativas para o segmento é descoberto a partir das respostas oficiais.
+As opções seguem as métricas oficiais de cotas ativas: Mercado total, Imóveis,
+Veículos Pesados, Automóveis, Motocicletas, Outros bens móveis duráveis
+(eletroeletrônicos, eletrodomésticos, móveis e outros), Serviços e cinco categorias
+adicionais (Ônibus e Micro-ônibus, Caminhões e Caminhões-Tratores, Equipamentos
+Rodoviários e Agrícolas, Máquinas Agrícolas, Embarcações e Aeronaves).
+Nessas cinco categorias adicionais, o catálogo só permite mostrar cotas ativas.
+Nas demais, o resultado mostra cotas ativas,
+crédito médio, prazo médio, taxa média de administração e contemplações quando
+as métricas correspondentes existem. Não há entrada por administradora.
 
 O cliente `httpx.AsyncClient` consulta o recurso documentado
 `/odata/Metricas(DataBase=@DataBase)` com `@DataBase=AAAAMM`, `$format=json` e
 `$top=200`. O Swagger foi conferido antes da implementação. O parser rejeita
-paginação/truncamento inesperados. Quantidades na unidade `mil` são multiplicadas por 1000 com `Decimal`
-antes de virarem inteiros. Créditos comercializados permanecem indisponíveis:
-o catálogo traz valor **médio** de crédito, semanticamente diferente do total.
+paginação/truncamento inesperados. Quantidades na unidade `mil` e crédito médio
+em `R$ mil` são multiplicados por 1000 com `Decimal`. Taxas são percentuais já
+expressos em `%`; prazos são meses. Contemplações de Motocicletas têm unidade
+`mi` no catálogo, ambígua para quantidade, e são omitidas. Veículos Pesados,
+Outros bens móveis duráveis e Serviços não têm contemplações individualizadas
+equivalentes; a consulta continua válida sem esse indicador.
 A mensagem é gerada a partir dos dados validados e salva no histórico antes do envio.
 Veja [o mapeamento e a investigação](docs/CONSULTA_BCB.md).
 
@@ -82,9 +90,10 @@ Veja [o mapeamento e a investigação](docs/CONSULTA_BCB.md).
 
 `POST /api/consultas` recebe `{"periodo":"2025-12"}`.
 `POST /api/consultas/mercado` recebe, por exemplo,
-`{"administradora":"Nome solicitado","periodo":null,"segmento":null,"uf":null}`.
+`{"segmento":"Automóveis","periodo":null}`.
 `GET /api/consultas` lista
 as 20 últimas tentativas; `GET /api/consultas/{id}` recupera uma execução.
+Registros antigos com o formato anterior permanecem legíveis no histórico.
 Pydantic rejeita entrada inválida com 422 antes da consulta. Tentativas válidas são
 registradas, inclusive duplicatas e falhas. Não se armazenam payloads HTTP inválidos.
 

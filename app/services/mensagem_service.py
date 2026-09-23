@@ -30,11 +30,14 @@ def gerar_mensagem(resultado: ConsorcioResultado | PanoramaResultado | Resultado
                 f"Fonte: {resultado.fonte}\n"
                 f"Consulta realizada em: {resultado.consultado_em:%d/%m/%Y %H:%M} UTC")
     if isinstance(resultado, PanoramaResultado):
-        segmento = "todo o mercado" if resultado.segmento == "Total" else resultado.segmento.lower()
+        assunto = (
+            "o mercado de consórcios" if resultado.segmento == "Total"
+            else f"consórcios de {resultado.segmento.lower()}"
+        )
         trimestre = int(resultado.periodo_referencia[-2:]) // 3
         linhas = [
             "Olá! 👋", "",
-            f"Consultei os dados agregados do Banco Central sobre consórcios de {segmento}.", "",
+            f"Consultei os dados agregados do Banco Central sobre {assunto}.", "",
             "📊 Panorama do mercado", "",
             f"Período: {resultado.periodo_referencia} ({trimestre}º trimestre)",
             f"Cotas ativas: {_inteiro_br(resultado.cotas_ativas)}",

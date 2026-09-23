@@ -14,14 +14,19 @@ FONTE = "Banco Central do Brasil"
 DATASET = "Dados Agregados do Segmento de Consórcios"
 METRICA = "Cotas ativas - Total"
 METRICA_ID = "10"
-SEGMENTOS_BCB = (
-    "Automóveis", "Motocicletas", "Imóveis", "Veículos Pesados",
-    "Outros bens móveis duráveis", "Serviços", "Total",
+SEGMENTOS_PRINCIPAIS_BCB = (
+    "Imóveis", "Veículos Pesados", "Automóveis", "Motocicletas",
+    "Outros bens móveis duráveis (eletroeletrônicos, eletrodomésticos, móveis e outros)",
+    "Serviços",
 )
-UFS_BCB = frozenset({
-    "AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", "MA", "MG", "MS", "MT",
-    "PA", "PB", "PE", "PI", "PR", "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO",
-})
+SUBSEGMENTOS_BCB = (
+    "Ônibus e Micro-ônibus (cód. 21)",
+    "Caminhões e Caminhões-Tratores (cód. 22)",
+    "Equipamentos Rodoviários e Agrícolas (cód. 23)",
+    "Máquinas Agrícolas (cód. 24)",
+    "Embarcações e Aeronaves (cód. 25)",
+)
+SEGMENTOS_BCB = ("Total", *SEGMENTOS_PRINCIPAIS_BCB, *SUBSEGMENTOS_BCB)
 
 
 class Status(StrEnum):
@@ -146,6 +151,9 @@ class ConsultaMercado:
     periodo: str | None = None
 
     def __post_init__(self) -> None:
+        # Aceita o identificador abreviado das consultas anteriores, mas grava o nome oficial.
+        if self.segmento == "Outros bens móveis duráveis":
+            object.__setattr__(self, "segmento", SEGMENTOS_PRINCIPAIS_BCB[4])
         if self.segmento not in SEGMENTOS_BCB:
             raise ValueError("Selecione um segmento publicado pelo BCB.")
         if self.periodo is not None:

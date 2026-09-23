@@ -16,7 +16,13 @@
     <label for="segmento" class="form-label">Tipo de consórcio</label>
     <select id="segmento" name="segmento" class="form-select mb-3" required>
       <option value="" selected disabled>Selecione o segmento</option>
-      {% for item in segmentos %}<option value="{{ item }}">{{ item if item != "Total" else "Mercado total" }}</option>{% endfor %}
+      <option value="Total">Mercado total (agregado)</option>
+      <optgroup label="Segmentos do BCB">
+        {% for item in segmentos_principais %}<option value="{{ item }}">{{ item }}</option>{% endfor %}
+      </optgroup>
+      <optgroup label="Detalhamento de veículos pesados — somente cotas ativas">
+        {% for item in subsegmentos %}<option value="{{ item }}">{{ item }}</option>{% endfor %}
+      </optgroup>
     </select>
     <label for="periodo" class="form-label">Período</label>
     <input id="periodo" name="periodo" type="month" class="form-control" aria-describedby="periodo-ajuda">

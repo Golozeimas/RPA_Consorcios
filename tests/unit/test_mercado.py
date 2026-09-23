@@ -1,11 +1,11 @@
 import asyncio
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 import json
 
 import pytest
 
-from app.domain import ConsultaMercado, DadosInvalidosError
+from app.domain import ConsultaMercado, DadosInvalidosError, FONTE, PanoramaResultado, SEGMENTOS_BCB
 from app.services.bcb_mercado_service import BCBMercadoService, normalizar_agregado, periodos_candidatos
 from app.services.mensagem_service import _decimal_br, _moeda_br, gerar_mensagem
 from app.services.ports import RespostaBCB
@@ -81,7 +81,7 @@ def test_mercado_total_agregado():
     assert resultado.prazo_medio == Decimal("167.0")
     assert resultado.taxa_administracao_media == Decimal("18.97")
     assert resultado.contemplacoes == 1855350
-    assert "todo o mercado" in gerar_mensagem(resultado)
+    assert "mercado de consórcios" in gerar_mensagem(resultado)
 
 
 def test_indicadores_opcionais_ausentes_nao_invalidam_consulta():
@@ -95,6 +95,31 @@ def test_indicadores_opcionais_ausentes_nao_invalidam_consulta():
     assert "Prazo médio:" not in mensagem
     assert "Taxa média de administração:" not in mensagem
     assert "Contemplações" not in mensagem
+
+
+@pytest.mark.parametrize("segmento,codigo,nome,valor", [
+    ("Ônibus e Micro-ônibus (cód. 21)", "17", "Cotas ativas - Ônibus e Micro-ônibus (cód. 21)", 10680),
+    ("Caminhões e Caminhões-Tratores (cód. 22)", "18", "Cotas Ativas - Caminhões e Caminhões-Tratores  (cód. 22)", 382230),
+    ("Equipamentos Rodoviários e Agrícolas (cód. 23)", "19", "Cotas ativas - Equipamentos Rodoviários e Agrícolas  (cód. 23)", 56470),
+    ("Máquinas Agrícolas (cód. 24)", "20", "Cotas ativas - Máquinas Agrícolas  (cód. 24)", 486470),
+    ("Embarcações e Aeronaves (cód. 25)", "21", "Cotas Ativas - Embarcações e Aeronaves (cód. 25)", 1070),
+])
+def test_subsegmentos_verificados_no_catalogo(segmento, codigo, nome, valor):
+    registro = (codigo, "Cotas ativas", nome, valor / 1000, "mil")
+    resultado = normalizar_agregado(resposta([registro]), ConsultaMercado(segmento), "2026-06")
+    assert resultado.cotas_ativas == valor
+    assert resultado.campos_indisponiveis == ["credito_medio", "prazo_medio", "taxa_administracao_media", "contemplacoes"]
+    mensagem = gerar_mensagem(resultado)
+    assert "Cotas ativas:" in mensagem
+    assert "Crédito médio:" not in mensagem
+
+
+def test_nome_oficial_dos_outros_bens_e_alias_anterior():
+    abreviado = ConsultaMercado("Outros bens móveis duráveis")
+    oficial = ConsultaMercado("Outros bens móveis duráveis (eletroeletrônicos, eletrodomésticos, móveis e outros)")
+    assert abreviado.segmento == oficial.segmento
+    assert abreviado.hash_consulta == oficial.hash_consulta
+    assert oficial.segmento in SEGMENTOS_BCB
 
 
 @pytest.mark.parametrize("alteracao", [
@@ -143,6 +168,23 @@ def test_identidade_consulta_e_formatacao_brasileira():
     assert "administradora" not in consulta.parametros
     assert _moeda_br(Decimal("48754.39")) == "R$ 48.754,39"
     assert _decimal_br(Decimal("18.426")) == "18,43"
+
+
+def test_mensagem_com_valores_ilustrativos_arredonda_percentual():
+    exemplo = PanoramaResultado(
+        segmento="Automóveis", periodo_referencia="2026-06",
+        cotas_ativas=1234567, credito_medio=Decimal("48754.39"),
+        prazo_medio=Decimal("62"), taxa_administracao_media=Decimal("18.426"),
+        contemplacoes=154231, data_consulta=datetime(2026, 9, 23, tzinfo=timezone.utc),
+        fonte=FONTE, source_url="https://olinda.bcb.gov.br/fixture",
+        campos_indisponiveis=[],
+    )
+    mensagem = gerar_mensagem(exemplo)
+    assert "Cotas ativas: 1.234.567" in mensagem
+    assert "Crédito médio: R$ 48.754,39" in mensagem
+    assert "Prazo médio: 62 meses" in mensagem
+    assert "Taxa média de administração: 18,43%" in mensagem
+    assert "Contemplações (cotas ativas, últimos 12 meses): 154.231" in mensagem
 
 
 @pytest.mark.parametrize("kwargs", [

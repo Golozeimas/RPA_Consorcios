@@ -23,6 +23,7 @@ BCB_PAYLOAD = {"value": [
     {"DataBase": 202606, "IdMetrica": "81", "Grupo": "Taxa de Administração", "Metrica": "Taxa Média Adm. dos grupos constituídos nos últimos 12 meses - Automóveis", "Valor": 15.16, "Unidade": "%"},
     {"DataBase": 202606, "IdMetrica": "34", "Grupo": "Ativos Contemplados", "Metrica": "Cotas ativas contempladas nos últimos 12 meses - Automóveis", "Valor": 818.74, "Unidade": "mil"},
     {"DataBase": 202606, "IdMetrica": "11", "Grupo": "Cotas ativas", "Metrica": "Cotas ativas - Imóveis", "Valor": 3202.55, "Unidade": "mil"},
+    {"DataBase": 202606, "IdMetrica": "17", "Grupo": "Cotas ativas", "Metrica": "Cotas ativas - Ônibus e Micro-ônibus (cód. 21)", "Valor": 10.68, "Unidade": "mil"},
 ]}
 ENTRADA = {"segmento": "Automóveis", "periodo": "2026-06"}
 DESTINO = {"destinatario": "+1 (555) 000-0001"}
@@ -70,6 +71,23 @@ def test_fluxo_http_validacao_mensagem_envio_historico_e_duplicidade(tmp_path):
     with TestClient(create_app(config, http_transport=httpx.MockTransport(handler))) as client:
         assert client.post(rota, json=DESTINO).json() == envio
         assert len(requests) == 2  # Proteção sobrevive ao reinício.
+
+
+def test_subsegmento_oficial_na_tela_e_na_consulta(tmp_path):
+    with TestClient(create_app(settings(tmp_path), http_transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json=BCB_PAYLOAD)
+    ))) as client:
+        pagina = client.get("/")
+        assert pagina.status_code == 200
+        assert "Ônibus e Micro-ônibus (cód. 21)" in pagina.text
+        assert "Outros bens móveis duráveis (eletroeletrônicos, eletrodomésticos, móveis e outros)" in pagina.text
+        consulta = client.post("/api/consultas/mercado", json={
+            "segmento": "Ônibus e Micro-ônibus (cód. 21)", "periodo": "2026-06",
+        }).json()
+        assert consulta["status"] == "SUCESSO"
+        assert consulta["dados_extraidos"]["cotas_ativas"] == 10680
+        assert consulta["dados_extraidos"]["credito_medio"] is None
+        assert "Crédito médio:" not in consulta["mensagem_gerada"]
 
 
 @pytest.mark.parametrize("cenario,status", [
