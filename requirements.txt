@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+playwright
+pydantic
+sqlalchemy
+httpx
+jinja2
+python-dotenv
+pytest
