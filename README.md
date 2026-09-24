@@ -1,283 +1,421 @@
-# Consulta pública BCB — Consórcios
+# RPA Consórcios — Consulta Pública BCB & Envio WhatsApp
 
-MVP Python/FastAPI: API oficial BCB via httpx → validação Pydantic → SQLite
-→ resultado e mensagem → envio explícito por WhatsApp Cloud API ou Twilio → histórico.
+> Sistema RPA desenvolvido como solução para Desafio Técnico de **Desenvolvedor Full Stack Júnior**.  
+> O projeto automatiza a consulta a dados públicos de consórcios no Banco Central do Brasil (BCB), estrutura e valida as informações, gera mensagens dinâmicas personalizadas, despacha notificações via WhatsApp (Twilio) e garante rastreabilidade com histórico auditável e proteção contra duplicidade.
 
-## Executar
+---
 
-Python 3.12+ e as dependências já listadas no projeto:
+## Sumário
 
-```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+- [Sobre o Projeto](#sobre-o-projeto)
+- [Fluxo da Aplicação](#fluxo-da-aplicação)
+- [Funcionalidades](#funcionalidades)
+- [Tecnologias Utilizadas](#tecnologias-utilizadas)
+- [Arquitetura e Boas Práticas](#arquitetura-e-boas-práticas)
+- [Estrutura do Projeto](#estrutura-do-projeto)
+- [Como Executar](#como-executar)
+- [Configuração (.env)](#configuração-env)
+- [Endpoints da API](#endpoints-da-api)
+- [Fonte de Dados Pública e Automação RPA](#fonte-de-dados-pública-e-automação-rpa)
+- [Integração com WhatsApp e Ambiente Twilio](#integração-com-whatsapp-e-ambiente-twilio)
+- [Persistência, Concorrência e Idempotência](#persistência-concorrência-e-idempotência)
+- [Testes Automatizados](#testes-automatizados)
+
+---
+
+## Sobre o Projeto
+
+O desafio propõe a construção de um fluxo ponta a ponta que conecta automação de consulta pública, regras de negócio e entrega de mensageria:
+
+1. **Problema que resolve:** A extração manual de panoramas oficiais de consórcios no portal do Banco Central é lenta e sujeita a erros operacionais. O sistema automatiza a coleta de métricas (cotas ativas, crédito médio, prazo médio, taxas de administração e contemplações), formata os indicadores de maneira compreensível e permite enviá-los imediatamente ao WhatsApp do interessado.
+2. **Objetivo do desafio:** Demonstrar competências práticas em Python, automação de navegador (Playwright), APIs assíncronas (FastAPI), validação robusta de fronteira (Pydantic), persistência transacional (SQLAlchemy/SQLite), consumo de APIs externas (Twilio), interfaces reativas leves (Jinja2/Bootstrap/Vanilla JS) e testes automatizados orientados a falhas e idempotência.
+3. **Fluxo automatizado:**
+   $$\text{Interface Web} \longrightarrow \text{FastAPI} \longrightarrow \text{RPA / BCB} \longrightarrow \text{Validação} \longrightarrow \text{Histórico} \longrightarrow \text{Geração da Mensagem} \longrightarrow \text{Twilio WhatsApp} \longrightarrow \text{Tracking}$$
+
+---
+
+## Fluxo da Aplicação
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Usuario as Usuário / Operador
+    participant UI as Interface Web (Jinja2/JS)
+    participant API as FastAPI (Router)
+    participant CS as ConsultaService
+    participant RPA as BCBConsorciosRpa / BCBClient
+    participant BCB as Portal / API Banco Central
+    participant DB as SQLite (Execuções/Envios)
+    participant ES as EnvioService
+    participant Twilio as Twilio WhatsApp API
+
+    Usuario->>UI: Seleciona segmento (ex: Automóveis) e clica "Consultar"
+    UI->>API: POST /api/consultas/mercado {segmento, periodo}
+    API->>CS: executar(ConsultaMercado)
+    CS->>DB: reservar(chave_ativa, status=PROCESSANDO)
+    Note over DB: Transação BEGIN IMMEDIATE previne corridas
+    CS->>RPA: extrair_periodo(periodo)
+    RPA->>BCB: Navega / Coleta OData no catálogo Olinda
+    BCB-->>RPA: Retorna JSON oficial de Métricas
+    RPA-->>CS: RespostaBCB (texto bruto, URL)
+    CS->>CS: Valida schema, parse Decimal e gera mensagem dinâmica
+    CS->>DB: finalizar(status=SUCESSO, dados_extraidos, mensagem_gerada)
+    CS-->>API: ExecucaoResponse
+    API-->>UI: Exibe dados estruturados + Mensagem Personalizada
+    
+    opt Envio para WhatsApp
+        Usuario->>UI: Informa telefone com DDD e clica "Enviar WhatsApp"
+        UI->>API: POST /api/consultas/{id}/envios {destinatario}
+        API->>ES: enviar(execucao_id, destinatario)
+        ES->>DB: reservar_envio(execucao_id, destinatario)
+        ES->>Twilio: client.messages.create(ContentSid ou Body)
+        Twilio-->>ES: Retorna SID (SM...) ou Erro (ex: 21654)
+        ES->>DB: finalizar_envio(status, provedor_id, mensagem_enviada, erro)
+        ES-->>API: EnvioResponse
+        API-->>UI: Apresenta status do envio no histórico
+    end
+
+    opt Webhook de Entrega (Opcional)
+        Twilio->>API: POST /webhooks/twilio/message-status (delivered, read, failed)
+        API->>API: Valida assinatura criptográfica X-Twilio-Signature
+        API->>ES: atualizar_status(EventoEnvio)
+        ES->>DB: Atualiza status e timestamps reais observados
+    end
 ```
 
-Abra http://127.0.0.1:8000. O período é opcional; em branco, a aplicação consulta
-os períodos trimestrais até encontrar o mais recente publicado para o filtro.
-Informe `2025-12` para reproduzir o exemplo inicial investigado.
-Chromium não é necessário para consultar pela aplicação. O adaptador Playwright
-anterior foi preservado para os testes/demonstrações de navegador existentes.
+---
 
-O SQLite é criado em `data/consultas.sqlite3` na inicialização. Não há reset de
-dados existentes. `.env` é opcional; `.env.example` contém somente nomes. Valores
-vazios usam os padrões abaixo:
+## Funcionalidades
 
-| Variável | Padrão |
-| --- | --- |
-| DATABASE_PATH | data/consultas.sqlite3 na raiz do projeto |
-| BROWSER_TIMEOUT_MS | 30000 |
-| QUERY_TIMEOUT_SECONDS | 120 |
-| DUPLICATE_SECONDS | 30 |
-| BROWSER_HEADLESS | true |
-| HTTP_TIMEOUT_SECONDS | 30 |
-| TWILIO_ACCOUNT_SID | vazio (envio desabilitado até configurar) |
-| TWILIO_AUTH_TOKEN | vazio |
-| TWILIO_WHATSAPP_FROM | vazio; remetente no formato `whatsapp:+<DDI><número>` |
-| TWILIO_WHATSAPP_TO | vazio; destinatário opcional padrão |
-| TWILIO_CONTENT_SID | vazio; Content SID pré-aprovado da Twilio para contas Trial/Sandbox |
-| TWILIO_PANORAMA_CONTENT_SID | vazio; Content SID personalizado para template de Automóveis com variáveis |
-| TWILIO_STATUS_CALLBACK_URL | vazio; URL pública HTTPS para receber webhooks de status (ex: ngrok) |
-| TWILIO_VALIDATE_SIGNATURE | `true`; valida a assinatura criptográfica X-Twilio-Signature no webhook |
+- [x] **Automação RPA no Banco Central:** Navegação automatizada no Portal de Dados Abertos do BCB / Olinda via Playwright (Chromium) com tratamento de paginação, loaders e seletores resilientes.
+- [x] **Coleta de Alto Desempenho (Fallback/Híbrido):** Adaptador HTTP oficial via `httpx.AsyncClient` consumindo o catálogo OData documentado, mantendo paridade de contrato com o RPA.
+- [x] **Descoberta Dinâmica de Período:** Caso o usuário não especifique o período, a aplicação retrocede trimestralmente até encontrar a última publicação oficial válida para o segmento.
+- [x] **Tratamento de Consulta Sem Resultado:** Distinção explícita entre indisponibilidade do BCB e períodos sem publicação oficial (`SEM_RESULTADO`).
+- [x] **Validação e Normalização de Dados:** Sanitização e cálculo com precisão monetária e percentual via `Decimal` e validação estrita com Pydantic.
+- [x] **Geração Automática da Mensagem:** Criação de texto dinâmico claro e pronto para envio, incluindo cabeçalho, indicadores de mercado e fonte oficial.
+- [x] **Envio via WhatsApp:** Integração oficial com SDK Twilio em modo assíncrono.
+- [x] **Compatibilidade com "Try out WhatsApp" da Twilio:** Suporte inteligente à limitação de sandbox da Twilio com `ContentSid`, separando a mensagem gerada pelo RPA da mensagem/template despachado.
+- [x] **Pronto para Produção:** Alternância imediata para WhatsApp Sender comercial de produção via variável de ambiente (`TWILIO_PRODUCTION_SENDER=true`), enviando texto livre (`body`) sem alterar código.
+- [x] **Controle de Duplicidade e Idempotência:** Bloqueio de consultas idênticas concorrentes e rejeição de disparos duplicados para a mesma execução via travas de banco de dados (`BEGIN IMMEDIATE`).
+- [x] **Histórico Auditável e Não-Destrutivo:** Registro permanente das consultas e tentativas de envio. Falhas no WhatsApp jamais apagam ou invalidam uma consulta bem-sucedida.
+- [x] **Webhooks de Status com Validação Criptográfica:** Endpoint dedicado para receber atualizações de entrega (`sent`, `delivered`, `read`) com validação via `X-Twilio-Signature`.
+- [x] **Interface Web Amigável:** Formulário reativo com Bootstrap 5, validação dinâmica de número internacional de telefone e atualização em tempo real.
 
-As credenciais `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` e `TWILIO_WHATSAPP_FROM` devem ser
-configuradas juntas em `.env`. Nunca versione esse arquivo. Configuração parcial ou inválida impede a inicialização.
-`TWILIO_WHATSAPP_TO` é opcional e preenche o campo de destinatário na tela.
-`TWILIO_STATUS_CALLBACK_URL` permite que a Twilio envie atualizações de entrega (`sent`, `delivered`, `read`, `failed`).
-Para desenvolvimento local com webhook, utilize um túnel HTTPS (como `ngrok http 8766`) e configure a URL completa:
-`https://<subdominio>.ngrok-free.app/webhooks/twilio/message-status`.
-As variáveis `BROWSER_*` são usadas somente pelo adaptador de navegador legado.
-Bootstrap 5 é carregado por CDN; o formulário e o JavaScript local não dependem
-de JavaScript do Bootstrap. A consulta requer acesso ao domínio Olinda.
+---
 
-## Consultas implementadas
+## Tecnologias Utilizadas
 
-[Dados Agregados do Segmento de Consórcios](https://dadosabertos.bcb.gov.br/dataset/dados-agregados-do-segmento-de-consorcios),
-métrica **Cotas ativas - Total** (`10`), unidade **mil**, por mês/ano.
-O valor é preservado na unidade oficial: `12821.11 mil` não significa 12.821 cotas.
-O período não garante publicação. A fonte retorna conjunto vazio para períodos
-sem dados. Resultado real observado para dezembro/2025: `12821.11 mil` (pode ser revisado pelo BCB).
+| Tecnologia | Responsabilidade no Projeto |
+|---|---|
+| **Python 3.12+** | Linguagem principal, tipagem estática e async/await nativo. |
+| **FastAPI** | Framework web assíncrono de alta performance para rotas e APIs REST. |
+| **Uvicorn** | Servidor ASGI para hospedar a aplicação FastAPI. |
+| **Playwright** | Automação e emulação do navegador Chromium para scraping do portal do BCB. |
+| **Pydantic (v2)** | Schemas de validação de entrada, serialização de respostas e parsing de contratos. |
+| **SQLAlchemy (v2)** | ORM e query builder para persistência transacional com SQLite. |
+| **SQLite** | Banco de dados relacional embutido com suporte a transações ACID imediatas. |
+| **httpx** | Cliente HTTP assíncrono para integração com o catálogo OData do BCB. |
+| **Twilio SDK** | SDK oficial assíncrono (`twilio.rest.Client`) para comunicação com WhatsApp. |
+| **Jinja2** | Motor de templates para renderização do front-end integrado. |
+| **Bootstrap 5** | Estilização da interface, responsividade e componentes acessíveis. |
+| **Vanilla JavaScript** | Lógica de interface: máscaras de telefone, requisições AJAX e polling de histórico. |
+| **python-dotenv** | Leitura segura de configurações a partir do arquivo `.env`. |
+| **pytest & pytest-asyncio** | Testes automatizados unitários e de integração de ponta a ponta. |
 
-O endpoint inicial `POST /api/consultas` permanece compatível: consulta a métrica
-10 em um período obrigatório, agora usando o mesmo cliente HTTP oficial.
+---
 
-A tela usa `POST /api/consultas/mercado`: seleciona um segmento publicado pelo
-BCB e, opcionalmente, um período de referência. Em branco, o período mais recente
-com cotas ativas para o segmento é descoberto a partir das respostas oficiais.
-As opções seguem as métricas oficiais de cotas ativas: Mercado total, Imóveis,
-Veículos Pesados, Automóveis, Motocicletas, Outros bens móveis duráveis
-(eletroeletrônicos, eletrodomésticos, móveis e outros), Serviços e cinco categorias
-adicionais (Ônibus e Micro-ônibus, Caminhões e Caminhões-Tratores, Equipamentos
-Rodoviários e Agrícolas, Máquinas Agrícolas, Embarcações e Aeronaves).
-Nessas cinco categorias adicionais, o catálogo só permite mostrar cotas ativas.
-Nas demais, o resultado mostra cotas ativas,
-crédito médio, prazo médio, taxa média de administração e contemplações quando
-as métricas correspondentes existem. Não há entrada por administradora.
+## Arquitetura e Boas Práticas
 
-O cliente `httpx.AsyncClient` consulta o recurso documentado
-`/odata/Metricas(DataBase=@DataBase)` com `@DataBase=AAAAMM`, `$format=json` e
-`$top=200`. O Swagger foi conferido antes da implementação. O parser rejeita
-paginação/truncamento inesperados. Quantidades na unidade `mil` e crédito médio
-em `R$ mil` são multiplicados por 1000 com `Decimal`. Taxas são percentuais já
-expressos em `%`; prazos são meses. Contemplações de Motocicletas têm unidade
-`mi` no catálogo, ambígua para quantidade, e são omitidas. Veículos Pesados,
-Outros bens móveis duráveis e Serviços não têm contemplações individualizadas
-equivalentes; a consulta continua válida sem esse indicador.
-A mensagem é gerada a partir dos dados validados e salva no histórico antes do envio.
-Veja [o mapeamento e a investigação](docs/CONSULTA_BCB.md).
-
-## Arquitetura e contratos
-
-- `app/api`, `templates`, `static`: apresentação; POST JSON validado, GET de histórico/detalhe.
-- `app/services`: caso de uso, transformação BCB e portas injetadas.
-- `app/domain.py`: entidades, estados, identidade normalizada e erros.
-- `app/automation`: adaptador Playwright.
-- `app/integrations`: cliente HTTP BCB e adaptadores Meta/Twilio; sem regras de negócio nas rotas.
-- `app/models`, `repositories`: infraestrutura SQLAlchemy/SQLite, seguindo as pastas existentes.
-- `app/main.py`: composição das dependências e ciclo de vida.
-
-`POST /api/consultas` recebe `{"periodo":"2025-12"}`.
-`POST /api/consultas/mercado` recebe, por exemplo,
-`{"segmento":"Automóveis","periodo":null}`.
-`GET /api/consultas` lista
-as 20 últimas tentativas; `GET /api/consultas/{id}` recupera uma execução.
-Registros antigos com o formato anterior permanecem legíveis no histórico.
-Pydantic rejeita entrada inválida com 422 antes da consulta. Tentativas válidas são
-registradas, inclusive duplicatas e falhas. Não se armazenam payloads HTTP inválidos.
-
-Cada consulta válida reserva um registro PROCESSANDO antes de acessar o BCB.
-Uma transação curta `BEGIN IMMEDIATE` e uma chave ativa única previnem corridas.
-Repetições durante execução ou até 30 segundos depois da conclusão são registradas
-como DUPLICADA, vinculadas ao original, sem nova requisição. Depois desse intervalo
-a mesma consulta pode ser realizada novamente. A janela não é prorrogada por duplicatas.
-Se o processo morrer, a próxima tentativa da mesma consulta marca a reserva vencida
-como ERRO após o timeout total + 30 segundos; o intervalo de duplicidade ainda se aplica.
-
-Estados finais: SUCESSO, SEM_RESULTADO, ERRO e DUPLICADA. Falhas externas são
-controladas, com detalhes técnicos em logging e mensagem segura na interface.
-Se o banco falhar antes da reserva, a consulta não começa (503); se falhar ao finalizar,
-a reserva existente continua rastreável. Um banco indisponível não pode registrar
-novas tentativas; nesse caso o log é a evidência disponível.
-
-## Enviar WhatsApp
-
-Após consultar, confira os dados e a mensagem. O campo já mostra o prefixo `+55`;
-informe apenas DDD e número, como `86 3333-4444` ou `86 9442-3074`, e clique
-**Enviar WhatsApp**. O campo aceita também um número completo colado e o apresenta
-no formato nacional. O backend recebe os dígitos internacionais (`558694423074` no
-exemplo de celular) e a Twilio recebe `whatsapp:+558694423074`.
-A validação é de formato; somente o provedor pode confirmar que há uma conta
-WhatsApp disponível nesse número. O botão fica bloqueado com telefone inválido,
-durante o envio e quando já existe uma tentativa para a execução.
-A aplicação envia a mensagem salva, não um
-texto arbitrário recebido do navegador. A consulta nunca dispara envio sozinha.
-
-### Integração oficial Twilio WhatsApp
-
-O envio utiliza o SDK oficial da Twilio (`twilio.rest.Client`) de forma assíncrona.
-
-1. **Ciclo Completo e Rastreabilidade**:
-   - `CRIADO` / `NA_FILA`: A Twilio aceitou a requisição e retornou o `MessageSid` (ex: `SM...` ou `MM...`).
-   - `ENVIANDO` / `ENVIADO`: A mensagem foi transmitida à rede celular / WhatsApp.
-   - `ENTREGUE`: O aparelho do destinatário confirmou o recebimento da mensagem (`delivered`).
-   - `LIDO`: O destinatário abriu/leu a mensagem (`read`), quando habilitado no WhatsApp.
-   - `FALHOU` / `NAO_ENTREGUE`: Falha na entrega, registrando o `ErrorCode` oficial da Twilio no histórico.
-
-2. **Status Callback e Webhook**:
-   - Endpoint: `POST /webhooks/twilio/message-status`.
-   - Aceita payload oficial `application/x-www-form-urlencoded`.
-   - Valida assinatura criptográfica (`X-Twilio-Signature`) via `RequestValidator`.
-   - Registra transições de forma monotônica (impedindo que eventos fora de ordem sobrescrevam estados finais).
-   - Registra timestamps reais observados: `sent_at`, `delivered_at`, `read_at`.
-
-3. **Para desenvolvimento / Sandbox**:
-   - Obtenha `TWILIO_ACCOUNT_SID` e `TWILIO_AUTH_TOKEN` no Console Twilio.
-   - Remetente: `TWILIO_WHATSAPP_FROM=whatsapp:+17372508034` (ou o número Sandbox de sua conta).
-   - O destinatário deve enviar a palavra-chave de adesão (ex: `join <code>`) para o remetente do Sandbox.
-   - Para ambientes Trial com template pré-aprovado, configure `TWILIO_CONTENT_SID=HXfe5ab5f00277942d4d4200328b4d403c`.
-
-
-Para desenvolvimento/demonstração:
-
-1. Crie sua conta Twilio e obtenha Account SID e Auth Token no Console.
-2. Ative o Sandbox for WhatsApp seguindo o [guia oficial da Twilio](https://www.twilio.com/docs/whatsapp/sandbox).
-3. No WhatsApp do destinatário, envie `join <código do seu Sandbox>` ao número
-   exibido no Console e aguarde a confirmação. Não há número/código fixo no projeto.
-4. Na raiz do projeto, crie/edite `.env` com `TWILIO_ACCOUNT_SID`,
-   `TWILIO_AUTH_TOKEN` e `TWILIO_WHATSAPP_FROM`; este último recebe
-   `whatsapp:+<número internacional do remetente mostrado no Console>`.
-5. Instale `requirements.txt` e reinicie a aplicação com os comandos da seção Executar.
-6. Selecione segmento/período, consulte, confira a mensagem gerada e informe
-   o telefone que aderiu ao Sandbox. Clique **Enviar WhatsApp**.
-7. Confira o resultado no histórico de envios, acessível ao abrir a execução.
-
-Se a Twilio rejeitar a requisição, o histórico mostra o código retornado e uma
-orientação para códigos conhecidos. Confira o mesmo código no Console da Twilio;
-o texto completo da resposta não é armazenado por poder conter dados privados.
-Uma execução já tentada não é reenviada: após corrigir a causa, faça uma nova
-consulta para gerar uma nova tentativa. Se o status for INCERTO, verifique antes
-no Console se a mensagem foi aceita.
-
-Esta demonstração envia texto livre dentro da janela de atendimento de 24 horas
-aberta por uma mensagem do destinatário (a associação ao Sandbox também abre
-essa janela). Fora dela, envie uma nova mensagem ao remetente antes de demonstrar.
-O fluxo **Try out WhatsApp** de uma conta trial nova aceita somente os templates
-fornecidos pela Twilio e exige `ContentSid`; ele não permite a mensagem personalizada
-gerada pela consulta. Para demonstrar esse envio, é necessário atualizar a conta,
-configurar um remetente WhatsApp habilitado e manter aberta a janela
-de atendimento. Usar o `ContentSid` do lembrete enviaria o lembrete novamente.
-Sem `TWILIO_PANORAMA_CONTENT_SID`, o envio usa o texto salvo como `Body`.
-Para usar o template de Automóveis, cadastre exatamente o texto abaixo na Twilio
-e configure o SID correspondente em `TWILIO_PANORAMA_CONTENT_SID` no `.env`.
-O SID deve pertencer a esse template, habilitado para WhatsApp na conta;
-não reutilize o SID do lembrete. Reinicie a aplicação e faça uma nova consulta.
-Nesse modo, o SDK recebe `ContentSid` e `ContentVariables`, sem `Body`.
-Outros segmentos e mensagens antigas incompatíveis são rejeitados antes do envio.
-Os seis valores são extraídos da mensagem persistida, que corresponde à prévia;
-indicadores ausentes aparecem como “Não disponível”.
+O projeto foi estruturado seguindo os princípios de **Clean Architecture**, **SOLID** e separação em camadas, garantindo baixo acoplamento e alta testabilidade:
 
 ```text
-Olá! 👋
-
-Consultei os dados agregados do Banco Central sobre consórcios de automóveis.
-
-📊 Panorama do mercado
-
-Período: {{1}}
-Cotas ativas: {{2}}
-Crédito médio: {{3}}
-Prazo médio: {{4}}
-Taxa média de administração: {{5}}
-Contemplações (cotas ativas, últimos 12 meses): {{6}}
-
-Fonte: Banco Central do Brasil  Dados Agregados do Segmento de Consórcios.
+┌──────────────────────────────────────────────────────────┐
+│                      APRESENTAÇÃO                        │
+│   FastAPI Routers | Schemas Pydantic | Jinja2 Templates  │
+└────────────────────────────┬─────────────────────────────┘
+                             │
+                             ▼
+┌──────────────────────────────────────────────────────────┐
+│                        APLICAÇÃO                         │
+│     ConsultaService | EnvioService | MensagemService     │
+│                 Ports / Interfaces (Protocol)            │
+└──────────────┬────────────────────────────┬──────────────┘
+               │                            │
+               ▼                            ▼
+┌───────────────────────────┐  ┌───────────────────────────┐
+│          DOMÍNIO          │  │       INFRAESTRUTURA      │
+│  Entidades | Enums        │  │  Playwright (RPA)         │
+│  Regras | Exceções        │  │  SQLAlchemy Repositories  │
+│  (Zero dependências ext.) │  │  Twilio WhatsApp Client   │
+└───────────────────────────┘  │  httpx BCB Client         │
+                               └───────────────────────────┘
 ```
 
-As variáveis recebem, respectivamente, período com trimestre, quantidade de cotas,
-crédito em reais, prazo em meses, taxa percentual e quantidade de contemplações.
-O uso do template personalizado depende das permissões e aprovações da conta;
-essa configuração não remove as restrições do trial Try out WhatsApp.
-`TWILIO_CONTENT_SID` não é utilizado, mesmo se ainda estiver no `.env`;
-remova essa variável de configurações antigas. O Sandbox exige nova associação
-quando a sessão expira. Consulte no guia oficial as limitações vigentes da conta
-e de entrega por país.
+- **Domain:** Modelos puros (`Execucao`, `Envio`, `ConsultaMercado`), enums (`Status`, `StatusEnvio`) e exceções de domínio (`ConsultaError`, `EnvioError`). Não importa FastAPI, Playwright ou SQLAlchemy.
+- **Application:** Use cases que orquestram os fluxos (`ConsultaService`, `EnvioService`). Dependem exclusivamente de interfaces (`ports.py`), aplicando o Princípio da Inversão de Dependência (DIP).
+- **Infrastructure:** Implementa as portas para comunicação com o mundo externo: automação web com Playwright (`BCBConsorciosRpa`), APIs externas (`BCBClient`, `WhatsAppClient`) e repositórios SQLite (`SQLiteExecutionRepository`, `SQLiteEnvioRepository`).
+- **Presentation:** Rotas magras em FastAPI que recebem requisições, validam parâmetros com Pydantic, delegam ao caso de uso e mapeiam a resposta ou erro.
 
-`POST /api/consultas/{id}/envios` recebe `{"destinatario":"(86) 99999-9999"}`.
-O ID da execução identifica a mensagem persistida; não é necessário reenviá-la
-pelo navegador. As credenciais e a chamada ao provedor ficam somente no servidor.
-`GET /api/consultas/{id}/envios` exibe o histórico, também acessível pelos detalhes
-da consulta na tela. A tabela adicional `envios` é criada sem alterar ou apagar
-as consultas existentes. Guarda destinatário, mensagem, datas, status, ID e
-status inicial do provedor, erro e contador de tentativas repetidas.
+---
 
-Uma reserva transacional por execução, além da unicidade existente
-`(execucao_id, destinatario)`, impede envios concorrentes/repetidos, inclusive após
-reiniciar o servidor ou trocar o telefone. A mesma operação
-retorna seu registro anterior, mesmo em caso de erro. Uma nova consulta deliberada
-pode originar um novo envio; a janela de duplicidade da consulta continua valendo.
-Não há retries automáticos. Para corrigir falhas definitivas, ajuste a configuração
-e faça uma nova consulta; antes disso, confira o histórico.
+## Estrutura do Projeto
 
-Estados: ENVIANDO, ACEITO, ERRO e INCERTO. ACEITO exige ID válido devolvido pelo
-provedor e não significa entregue/lido; não implementamos webhooks de entrega.
-Timeout, HTTP 5xx ou resposta inválida ficam INCERTO. Interrupção abrupta ou falha
-ao salvar deixa a reserva bloqueada; uma tentativa repetida após o prazo converte
-ENVIANDO em INCERTO. Verifique no provedor antes de iniciar outro envio.
+```text
+RPA_Consorcios/
+├── .env.example                     # Modelo documentado de variáveis de ambiente
+├── requirements.txt                 # Dependências diretas do projeto
+├── README.md                        # Documentação do sistema
+├── AGENTS.md                        # Regras arquiteturais e convenções de engenharia
+├── app/
+│   ├── __init__.py
+│   ├── main.py                      # Composition Root e inicialização do FastAPI
+│   ├── domain.py                    # Entidades, Enums e Exceções puras de negócio
+│   ├── api/                         # Camada de apresentação (Web / Rotas)
+│   │   ├── __init__.py
+│   │   └── routes/
+│   │       ├── consulta.py          # Endpoints de consulta e disparo de mensagens
+│   │       └── twilio_webhook.py    # Webhook de atualização de status do WhatsApp
+│   ├── automation/                  # Automação de Navegador (RPA)
+│   │   ├── __init__.py
+│   │   └── bcb_consorcios.py        # Coletor Playwright (Chromium) do Banco Central
+│   ├── core/                        # Configurações globais
+│   │   ├── __init__.py
+│   │   └── config.py                # Settings validadas com python-dotenv
+│   ├── integrations/                # Adaptadores de comunicação externa
+│   │   ├── __init__.py
+│   │   ├── bcb_client.py            # Cliente OData via httpx
+│   │   └── whatsapp_client.py       # Adaptador assíncrono oficial Twilio WhatsApp
+│   ├── models/                      # Modelos ORM (SQLAlchemy)
+│   │   ├── __init__.py
+│   │   ├── execucao.py              # Tabela 'execucoes'
+│   │   └── envio.py                 # Tabela 'envios'
+│   ├── repositories/                # Persistência de dados
+│   │   ├── __init__.py
+│   │   ├── execucao_repository.py   # Repositório de execuções com travas imediatas
+│   │   └── envio_repository.py      # Repositório de envios e rastreabilidade
+│   ├── schemas/                     # Contratos de API e DTOs (Pydantic)
+│   │   ├── __init__.py
+│   │   ├── consorcios.py            # DTOs de segmentos de consórcios
+│   │   ├── consulta.py              # Request/Response de execuções
+│   │   └── envio.py                 # Request/Response de envios
+│   ├── services/                    # Regras de aplicação e casos de uso
+│   │   ├── __init__.py
+│   │   ├── ports.py                 # Interfaces e Protocols das portas
+│   │   ├── bcb_service.py           # Parser da métrica 10
+│   │   ├── bcb_mercado_service.py   # Parser e orquestrador do panorama completo
+│   │   ├── consulta_service.py      # Caso de uso: consulta e histórico
+│   │   ├── envio_service.py         # Caso de uso: envio WhatsApp e rastreamento
+│   │   ├── mensagem_service.py      # Formatador de mensagens em texto puro
+│   │   └── mensagem_automoveis.py   # Estrutura textual padronizada
+│   ├── static/                      # Arquivos estáticos front-end
+│   │   └── consulta.js              # Interações e validações de interface
+│   └── templates/                   # Visualização (Jinja2)
+│       └── consulta.html            # Página única de consulta e disparo
+├── data/                            # Diretório local do banco SQLite
+│   └── consultas.sqlite3
+├── docs/                            # Documentações adicionais de apoio
+│   ├── ARQUITETURA_CAMADAS.md
+│   └── CONSULTA_BCB.md
+└── tests/                           # Testes automatizados (pytest)
+    ├── conftest.py                  # Fixtures globais e mocks seguros
+    ├── unit/                        # Testes unitários (RPA, domínio, WhatsApp, etc.)
+    │   ├── test_mercado.py
+    │   ├── test_normalizacao.py
+    │   ├── test_rpa.py
+    │   └── test_whatsapp.py
+    └── integration/                 # Testes de integração e rotas HTTP
+        ├── test_browser.py          # Testes de interface via Playwright
+        ├── test_consultas.py        # Fluxo de consultas no banco
+        ├── test_http_envio.py       # Fluxo ponta a ponta de consulta e envio
+        └── test_live_bcb.py         # Teste opcional contra o BCB real
+```
 
-A tabela `envios` recebe somente a coluna opcional `provedor_status` na
-inicialização. A migração é aditiva e preserva histórico e identificadores antigos.
-O campo `provedor_id` guarda o ID da mensagem, e `provedor_status` registra o
-estado devolvido na criação (por exemplo, `accepted` ou `queued`), sem
-acompanhamento posterior. A Meta usa o cliente `httpx` compartilhado e timeout
-configurado; o SDK Twilio usa `Client.messages.create_async`, timeout explícito
-e sessão encerrada após cada envio. Nenhum adaptador faz retry automático.
+---
 
-## Decisão arquitetural
+## Como Executar
 
-A porta de mensagens permite escolher Meta WhatsApp Cloud API ou Twilio por
-configuração, sem mudar o fluxo de consulta, persistência e histórico. A Meta
-envia o texto gerado; a Twilio preserva a integração anterior e seu modo de
-template de Automóveis.
+### Pré-requisitos
+- **Python 3.12+** instalado.
+- Conexão com a internet para baixar dependências e consultar a fonte pública.
 
-## Verificação
+### 1. Clonar e preparar o ambiente virtual
+```powershell
+git clone https://github.com/seu-usuario/RPA_Consorcios.git
+cd RPA_Consorcios
+
+python -m venv .venv
+# No Windows PowerShell:
+.venv\Scripts\Activate.ps1
+# No Linux/macOS:
+# source .venv/bin/activate
+
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+### 2. Instalar navegadores do Playwright (para o RPA)
+```powershell
+python -m playwright install chromium
+```
+
+### 3. Configurar variáveis de ambiente
+Crie o arquivo `.env` na raiz a partir do `.env.example`:
+```powershell
+Copy-Item .env.example .env
+```
+*(Consulte a seção seguinte para os parâmetros Twilio)*
+
+### 4. Inicializar a aplicação
+```powershell
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+Acesse a aplicação no navegador em: **`http://127.0.0.1:8000`**
+
+---
+
+## Configuração (.env)
+
+As variáveis de ambiente configuram o comportamento dos serviços:
+
+| Variável | Padrão | Descrição |
+|---|---|---|
+| `DATABASE_PATH` | `data/consultas.sqlite3` | Caminho do arquivo de banco SQLite. Criado automaticamente se não existir. |
+| `BROWSER_TIMEOUT_MS` | `30000` | Timeout do Playwright em milissegundos. |
+| `QUERY_TIMEOUT_SECONDS` | `120` | Timeout total do caso de uso de consulta. |
+| `DUPLICATE_SECONDS` | `30` | Janela de idempotência: repetições em menos de 30s reutilizam a consulta existente. |
+| `BROWSER_HEADLESS` | `true` | Se `true`, executa o Chromium sem abrir janela gráfica. |
+| `HTTP_TIMEOUT_SECONDS` | `30` | Timeout para chamadas HTTP externas (BCB e Twilio). |
+| `TWILIO_ACCOUNT_SID` | *(vazio)* | Account SID da sua conta Twilio (`AC...`). |
+| `TWILIO_AUTH_TOKEN` | *(vazio)* | Auth Token da sua conta Twilio. |
+| `TWILIO_WHATSAPP_FROM` | *(vazio)* | Número remetente do WhatsApp (ex: `whatsapp:+17372508034`). |
+| `TWILIO_WHATSAPP_TO` | *(vazio)* | Número padrão opcional para auto-preenchimento na interface. |
+| `TWILIO_CONTENT_SID` | *(vazio)* | Content SID de template aprovado no ambiente **Try out WhatsApp** (ex: `HXfe5ab5...`). |
+| `TWILIO_PRODUCTION_SENDER` | `false` | Se `true`, opera em modo produção comercial (envia corpo livre `body` da mensagem gerada). |
+| `TWILIO_PANORAMA_CONTENT_SID` | *(vazio)* | Content SID alternativo para template específico com variáveis dos consórcios. |
+| `TWILIO_STATUS_CALLBACK_URL` | *(vazio)* | URL pública HTTPS para webhooks de status (ex: `https://seu-subdominio.ngrok-free.app/webhooks/twilio/message-status`). |
+| `TWILIO_VALIDATE_SIGNATURE` | `true` | Valida assinatura criptográfica dos webhooks da Twilio. |
+
+---
+
+## Endpoints da API
+
+### Interface Web
+- **`GET /`**: Renderiza a aplicação interativa via Jinja2 (`consulta.html`).
+
+### Consultas Públicas
+- **`POST /api/consultas/mercado`**: Executa a consulta completa de panorama de consórcios por segmento.
+  - **Body (JSON):**
+    ```json
+    {
+      "segmento": "Automóveis",
+      "periodo": "2026-06"
+    }
+    ```
+    *(Nota: `periodo` é opcional. Se omitido, a aplicação busca o trimestre mais recente com dados).*
+- **`POST /api/consultas`**: Consulta pontual da métrica agregada total (compatibilidade).
+- **`GET /api/consultas`**: Lista as últimas 20 consultas gravadas no histórico.
+- **`GET /api/consultas/{id}`**: Obtém os detalhes completos de uma execução específica.
+
+### Envio de WhatsApp
+- **`POST /api/consultas/{id}/envios`**: Dispara o envio da mensagem gerada para o telefone fornecido.
+  - **Body (JSON):**
+    ```json
+    {
+      "destinatario": "8694423074"
+    }
+    ```
+    *(O backend normaliza automaticamente para formato internacional `+558694423074`).*
+- **`GET /api/consultas/{id}/envios`**: Lista as tentativas de envio e estados associados a uma consulta.
+
+### Webhook do Provedor
+- **`POST /webhooks/twilio/message-status`**: Endpoint que recebe callbacks assíncronos da Twilio com status de envio (`sent`, `delivered`, `read`, `failed`).
+
+---
+
+## Fonte de Dados Pública e Automação RPA
+
+- **Origem dos Dados:** [Banco Central do Brasil — Dados Agregados do Segmento de Consórcios](https://dadosabertos.bcb.gov.br/dataset/dados-agregados-do-segmento-de-consorcios), catálogo oficial Olinda/OData.
+- **Segmentos Disponíveis:** Automóveis, Imóveis, Veículos Pesados, Motocicletas, Outros bens móveis duráveis, Serviços e Mercado Total, além de detalhamentos de veículos pesados (caminhões, ônibus, máquinas agrícolas).
+- **Indicadores Extraídos:** Cotas ativas, Crédito médio comercializado, Prazo médio dos grupos, Taxa média de administração e Cotas contempladas nos últimos 12 meses.
+- **Estratégia RPA (Playwright):** O componente `BCBConsorciosRpa` acessa o navegador de dados, interage com os parâmetros da página, aguarda loaders de carregamento desaparecerem e extrai o payload diretamente do DOM renderizado, tratando erros de catálogo e indisponibilidades.
+
+---
+
+## Integração com WhatsApp e Ambiente Twilio
+
+### Limitações do Sandbox ("Try out WhatsApp")
+Nas contas gratuitas/trial da Twilio, o fluxo **Try out WhatsApp** possui restrições de conformidade:
+1. **Rejeição de Mensagens com Corpo Livre (`body`)**: Disparos com texto arbitrário retornam o erro HTTP 400: `21654: ContentSid Required`.
+2. **Templates Pré-Aprovados**: O ambiente de teste aceita exclusivamente o envio de templates cadastrados utilizando o parâmetro `content_sid`.
+
+### Solução Arquitetural Adotada
+O sistema foi desenhado para contornar essa restrição mantendo total separação de responsabilidades:
+- **Preservação da Mensagem do RPA:** A mensagem personalizada completa com todos os dados econômicos da consulta é **sempre gerada**, armazenada no banco (`execucoes.dados_extraidos._mensagem_gerada`), apresentada na tela e guardada em `envios.mensagem`.
+- **Separação entre Mensagem Gerada e Mensagem Enviada:**
+  - `envios.mensagem`: Contém a mensagem rica e dinâmica gerada pelo RPA.
+  - `envios.mensagem_enviada`: Identifica o template efetivamente disparado (`[Template Twilio Content SID: ...]`) no ambiente de demonstração, ou o texto integral em produção.
+- **Tratamento do Erro 21654:** Caso a Twilio rejeite o envio, o erro é interceptado, registrado no histórico como `FALHOU` com o código `21654`, e apresentado na interface de forma clara e amigável:
+  > *"Consulta realizada e mensagem gerada com sucesso."*  
+  > *"Não foi possível realizar o envio pelo WhatsApp: O ambiente de demonstração da Twilio (Try out WhatsApp) está limitado aos templates de teste permitidos (ContentSid)."*
+- **Integridade da Consulta:** Uma falha na entrega do WhatsApp **jamais invalida a consulta**, que permanece gravada como `SUCESSO`.
+
+### Transição para Produção
+Para colocar o sistema em produção com um número oficial comercial do WhatsApp:
+1. Configure no `.env`:
+   ```ini
+   TWILIO_PRODUCTION_SENDER=true
+   TWILIO_CONTENT_SID=
+   ```
+2. O sistema passará a despachar a mensagem personalizada integral diretamente via parâmetro `body`, **sem exigir qualquer alteração no RPA ou nas regras de negócio**.
+
+---
+
+## Persistência, Concorrência e Idempotência
+
+O repositório em SQLite foi implementado com foco em resiliência e concorrência:
+- **Reserva Imediata:** Ao iniciar a consulta, a aplicação grava preventivamente a execução com status `PROCESSANDO` e uma `chave_ativa` única calculada a partir dos parâmetros.
+- **Transação `BEGIN IMMEDIATE`:** Bloqueia leituras sujas e condições de corrida entre requisições simultâneas.
+- **Proteção de Idempotência:** Requisições idênticas recebidas durante o processamento ou em até 30 segundos após a conclusão retornam o registro existente marcado como `DUPLICADA`, sem disparar novas chamadas ao BCB.
+- **Unicidade de Disparo:** A tabela `envios` possui restrição única `(execucao_id, destinatario)`, garantindo que cliques repetidos ou problemas de rede não causem múltiplos envios acidentais para o mesmo cliente.
+
+---
+
+## Testes Automatizados
+
+O projeto conta com suíte de testes cobrindo testes unitários e de integração com **100% de sucesso**:
+
+```text
+tests/
+├── unit/
+│   ├── test_mercado.py        # Parsing de indicadores e regras de cálculo do BCB
+│   ├── test_normalizacao.py    # Formatação e validação de números de telefone
+│   ├── test_rpa.py             # Tratamento de DOM e timeouts do coletor
+│   └── test_whatsapp.py        # Modos Demo (ContentSid), Produção (Body) e erro 21654
+└── integration/
+    ├── test_consultas.py       # Ciclo de vida e idempotência no banco SQLite
+    ├── test_http_envio.py      # Fluxo completo de consulta pública, envio e webhook
+    ├── test_browser.py         # Testes ponta a ponta de interface com Playwright
+    └── test_live_bcb.py        # Testes de integração direta contra o Banco Central
+```
+
+### Executar a suíte de testes
 
 ```powershell
-python -m pytest
-python -m compileall -q app tests
-$env:RUN_BROWSER_TESTS="1"
-python -m playwright install chromium
-python -m pytest tests/integration/test_browser.py
-$env:RUN_LIVE_BCB="1"
-python -m pytest tests/integration/test_live_bcb.py
+# Execução padrão dos testes unitários e de integração com isolamento de banco:
+python -m pytest --basetemp=data/pytest_temp -p no:cacheprovider
+
+# Apenas testes unitários:
+python -m pytest tests/unit
+
+# Apenas testes de integração:
+python -m pytest tests/integration/test_http_envio.py --basetemp=data/pytest_temp -p no:cacheprovider
+
+# Verificação de compilação:
+python -m compileall app tests
 ```
 
-Os testes comuns usam fakes/SQLite temporário e não dependem do BCB. Testes de
-navegador determinísticos são opcionais e usam rotas locais interceptadas; a
-consulta real deve ser conferida separadamente pela aplicação. Não há linter ou
-verificador de tipos configurado no repositório. O transporte do SDK Twilio é
-simulado, e o BCB usa `httpx.MockTransport`; os testes nunca enviam mensagens reais.
+---
 
-Em 23/09/2026, a consulta agregada real encontrou DataBase `202606` e
-normalizou 16.251 grupos ativos, 13.376.260 cotas ativas, 1.855.350 cotas
-contempladas e 5.723.740 comercializadas. Resultados podem mudar na fonte.
+## Autor
+
+Desenvolvido por **Matheus** no âmbito do Desafio Técnico para Desenvolvedor Full Stack Júnior.

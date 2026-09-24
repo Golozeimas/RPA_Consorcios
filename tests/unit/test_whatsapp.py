@@ -136,7 +136,7 @@ def test_destinatario_padrao_do_env_e_normalizado(monkeypatch):
 
 def test_envio_preserva_texto_da_consulta_em_producao(twilio_request):
     mensagem = "Panorama do mercado — Automóveis\nCotas ativas: 5.558.340\nCrédito médio: R$ 75.950,00"
-    resultado = asyncio.run(gateway(is_production=True).enviar("5586999999999", mensagem))
+    resultado = asyncio.run(gateway(content_sid="", is_production=True).enviar("5586999999999", mensagem))
     assert resultado.status == StatusEnvio.NA_FILA
     assert resultado.mensagem_enviada == mensagem
     payload = twilio_request.call_args.kwargs["data"]
