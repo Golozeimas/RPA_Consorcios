@@ -78,6 +78,8 @@ class StatusEnvio(StrEnum):
 
 def normalizar_destinatario(valor: str) -> str:
     valor = valor.strip()
+    if valor.startswith("whatsapp:"):
+        valor = valor.removeprefix("whatsapp:")
     if not re.fullmatch(r"\+?[0-9\s()-]+", valor):
         raise ValueError("Informe um número de WhatsApp válido.")
     telefone = re.sub(r"[\s()+-]", "", valor)

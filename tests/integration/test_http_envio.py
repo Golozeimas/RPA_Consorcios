@@ -1,6 +1,7 @@
 """Fronteiras HTTP simuladas; nunca envia mensagens reais."""
 
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 import json
 import os
 
@@ -213,7 +214,8 @@ def test_reserva_de_envio_falha_antes_de_chamar_provedor(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(os.getenv("RUN_BROWSER_TESTS") != "1", reason="Chromium opcional para testar a interface")
-def test_interface_consulta_preview_envio_e_historico(tmp_path, twilio_request):
+@pytest.mark.parametrize("destinatario_padrao", ["", "5586999999999"])
+def test_interface_consulta_preview_envio_e_historico(tmp_path, twilio_request, destinatario_padrao):
     from playwright.sync_api import expect, sync_playwright
 
     def handler(request):
@@ -221,7 +223,8 @@ def test_interface_consulta_preview_envio_e_historico(tmp_path, twilio_request):
             return httpx.Response(200, json=BCB_PAYLOAD)
         pytest.fail("httpx deve acessar somente o BCB")
 
-    with TestClient(create_app(settings(tmp_path), http_transport=httpx.MockTransport(handler))) as client:
+    config = replace(settings(tmp_path), twilio_whatsapp_to=destinatario_padrao)
+    with TestClient(create_app(config, http_transport=httpx.MockTransport(handler))) as client:
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch()
             try:
@@ -244,12 +247,16 @@ def test_interface_consulta_preview_envio_e_historico(tmp_path, twilio_request):
                 page.get_by_role("button", name="Consultar Banco Central").click()
                 expect(page.locator("#mensagem")).to_contain_text("5.558.340")
                 twilio_request.assert_not_awaited()
-                expect(page.get_by_role("button", name="Enviar WhatsApp")).to_be_disabled()
+                expect(page.get_by_label("WhatsApp do destinatário")).to_have_value(destinatario_padrao)
+                if destinatario_padrao:
+                    expect(page.get_by_role("button", name="Enviar WhatsApp")).to_be_enabled()
+                else:
+                    expect(page.get_by_role("button", name="Enviar WhatsApp")).to_be_disabled()
                 page.get_by_label("WhatsApp do destinatário").fill("99999-9999")
                 expect(page.locator("#telefone-validacao")).to_contain_text("Informe um número")
                 expect(page.get_by_role("button", name="Enviar WhatsApp")).to_be_disabled()
                 twilio_request.assert_not_awaited()
-                page.get_by_label("WhatsApp do destinatário").fill("(86) 99999-9999")
+                page.get_by_label("WhatsApp do destinatário").fill("whatsapp:+55 (86) 99999-9999")
                 expect(page.locator("#telefone-validacao")).to_contain_text("+5586999999999")
                 page.get_by_role("button", name="Enviar WhatsApp").click()
                 expect(page.locator("#envio-estado")).to_contain_text("Mensagem aceita")

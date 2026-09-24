@@ -14,6 +14,7 @@ let execucaoAtual = null;
 
 function normalizarTelefone(valor) {
   valor = valor.trim();
+  if (valor.startsWith("whatsapp:")) valor = valor.slice("whatsapp:".length);
   if (!/^\+?[0-9\s()-]+$/.test(valor)) return null;
   let telefone = valor.replace(/[\s()+-]/g, "");
   const nacional = /^[1-9][0-9](?:9[0-9]{8}|[2-5][0-9]{7})$/;

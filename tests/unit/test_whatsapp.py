@@ -13,6 +13,7 @@ from app.integrations.whatsapp_client import WhatsAppClient
     ("(86) 99999-9999", "5586999999999"),
     ("86 99999-9999", "5586999999999"),
     ("+55 86 99999-9999", "5586999999999"),
+    ("whatsapp:+55 86 99999-9999", "5586999999999"),
     ("5586999999999", "5586999999999"),
     ("(11) 3333-4444", "551133334444"),
     ("+1 (555) 000-0001", "15550000001"),
@@ -103,3 +104,9 @@ def test_sessao_sdk_fecha_em_sucesso_e_falha(monkeypatch, twilio_request, falha)
 def test_configuracao_incompleta_ou_invalida(campos):
     with pytest.raises(ValueError):
         Settings(**campos)
+
+
+def test_destinatario_padrao_do_env_e_normalizado(monkeypatch):
+    monkeypatch.setattr("app.core.config.load_dotenv", lambda *_: None)
+    monkeypatch.setenv("TWILIO_WHATSAPP_TO", "whatsapp:+55 86 99999-9999")
+    assert Settings.from_env().twilio_whatsapp_to == "5586999999999"

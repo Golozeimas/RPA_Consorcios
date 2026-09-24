@@ -35,10 +35,15 @@ vazios usam os padrões abaixo:
 | TWILIO_ACCOUNT_SID | vazio (envio desabilitado até configurar) |
 | TWILIO_AUTH_TOKEN | vazio |
 | TWILIO_WHATSAPP_FROM | vazio; remetente no formato `whatsapp:+<DDI><número>` |
+| TWILIO_WHATSAPP_TO | vazio; destinatário opcional padrão, também no formato `whatsapp:+<DDI><número>` |
 
-As três variáveis `TWILIO_*` devem ser configuradas juntas em `.env`.
+As três credenciais/remetente `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` e
+`TWILIO_WHATSAPP_FROM` devem ser configuradas juntas em `.env`.
 Nunca versione esse arquivo. Configuração parcial ou inválida impede a inicialização.
-O destinatário vem do formulário; não existe `TWILIO_WHATSAPP_TO` fixo.
+`TWILIO_WHATSAPP_TO` é opcional e apenas preenche o campo de destinatário na tela;
+o usuário ainda pode editar o número antes do envio. O valor aceita `whatsapp:+...`
+ou o telefone internacional e é normalizado ao iniciar a aplicação. O destinatário
+efetivamente escolhido continua sendo validado pelo backend e registrado no histórico.
 As variáveis `BROWSER_*` são usadas somente pelo adaptador de navegador legado.
 Bootstrap 5 é carregado por CDN; o formulário e o JavaScript local não dependem
 de JavaScript do Bootstrap. A consulta requer acesso ao domínio Olinda.

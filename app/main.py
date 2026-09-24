@@ -71,7 +71,7 @@ def create_app(
             engine.dispose()
 
     app = FastAPI(title="Consulta pública BCB — Consórcios", lifespan=lifespan)
-    app.include_router(criar_router(service, mercado, envio))
+    app.include_router(criar_router(service, mercado, envio, settings.twilio_whatsapp_to))
     app.mount("/static", StaticFiles(directory=ROOT / "app" / "static"), name="static")
 
     @app.exception_handler(PersistenciaError)
