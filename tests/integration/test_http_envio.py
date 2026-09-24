@@ -122,6 +122,8 @@ def test_falhas_whatsapp_persistidas_sem_reenvio(tmp_path, cenario, status, twil
         assert envio["status"] == status
         assert envio["erro"]
         assert "privado" not in envio["erro"]
+        if cenario in {"400", "401", "403", "429"}:
+            assert "código Twilio 20003" in envio["erro"]
         assert client.post(rota, json=DESTINO).json() == envio
         assert client.get(rota).json() == [envio]
         assert twilio_request.await_count == 1
@@ -247,7 +249,11 @@ def test_interface_consulta_preview_envio_e_historico(tmp_path, twilio_request, 
                 page.get_by_role("button", name="Consultar Banco Central").click()
                 expect(page.locator("#mensagem")).to_contain_text("5.558.340")
                 twilio_request.assert_not_awaited()
-                expect(page.get_by_label("WhatsApp do destinatário")).to_have_value(destinatario_padrao)
+                expect(page.locator("#ddi-destinatario")).to_have_text("+55")
+                expect(page.get_by_label("WhatsApp do destinatário")).to_have_attribute("placeholder", "86 XXXX-XXXX")
+                expect(page.get_by_label("WhatsApp do destinatário")).to_have_value(
+                    "86 99999-9999" if destinatario_padrao else ""
+                )
                 if destinatario_padrao:
                     expect(page.get_by_role("button", name="Enviar WhatsApp")).to_be_enabled()
                 else:
@@ -256,8 +262,13 @@ def test_interface_consulta_preview_envio_e_historico(tmp_path, twilio_request, 
                 expect(page.locator("#telefone-validacao")).to_contain_text("Informe um número")
                 expect(page.get_by_role("button", name="Enviar WhatsApp")).to_be_disabled()
                 twilio_request.assert_not_awaited()
+                page.get_by_label("WhatsApp do destinatário").fill("86 3333-4444")
+                expect(page.locator("#telefone-validacao")).to_contain_text("+558633334444")
+                expect(page.get_by_role("button", name="Enviar WhatsApp")).to_be_enabled()
                 page.get_by_label("WhatsApp do destinatário").fill("whatsapp:+55 (86) 99999-9999")
                 expect(page.locator("#telefone-validacao")).to_contain_text("+5586999999999")
+                page.get_by_label("WhatsApp do destinatário").blur()
+                expect(page.get_by_label("WhatsApp do destinatário")).to_have_value("86 99999-9999")
                 page.get_by_role("button", name="Enviar WhatsApp").click()
                 expect(page.locator("#envio-estado")).to_contain_text("Mensagem aceita")
                 expect(page.locator("#envio-historico")).to_contain_text("***9999")

@@ -37,9 +37,13 @@
     <pre id="mensagem" style="white-space: pre-wrap" hidden></pre>
     <form id="envio-form" hidden>
       <label for="destinatario" class="form-label">Telefone / WhatsApp do destinatário</label>
-      <input id="destinatario" type="tel" class="form-control" maxlength="30" required autocomplete="tel"
-             value="{{ destinatario_padrao }}" placeholder="+55 86 99999-9999" aria-describedby="telefone-ajuda telefone-validacao">
-      <p id="telefone-ajuda" class="form-text">Informe DDD e número. O código +55 é adicionado automaticamente para telefones brasileiros.</p>
+      <div class="input-group">
+        <span id="ddi-destinatario" class="input-group-text">+55</span>
+        <input id="destinatario" type="tel" class="form-control" maxlength="30" required autocomplete="tel"
+               value="{{ destinatario_padrao }}" placeholder="86 XXXX-XXXX"
+               aria-describedby="ddi-destinatario telefone-ajuda telefone-validacao">
+      </div>
+      <p id="telefone-ajuda" class="form-text">Informe DDD e número: 86 XXXX-XXXX para fixo ou 86 9XXXX-XXXX para celular.</p>
       <p id="telefone-validacao" role="status" aria-live="polite" class="form-text"></p>
       <p class="form-text">Envie a um destinatário que autorizou o contato e enviou uma mensagem nas últimas 24 horas.</p>
       <button id="enviar" class="btn btn-success" type="submit" disabled>Enviar WhatsApp</button>

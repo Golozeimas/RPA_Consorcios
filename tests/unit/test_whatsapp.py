@@ -16,6 +16,8 @@ from app.integrations.whatsapp_client import WhatsAppClient
     ("whatsapp:+55 86 99999-9999", "5586999999999"),
     ("5586999999999", "5586999999999"),
     ("(11) 3333-4444", "551133334444"),
+    ("(86) 9442-3074", "558694423074"),
+    ("+55 86 9442-3074", "558694423074"),
     ("+1 (555) 000-0001", "15550000001"),
 ])
 def test_normalizacao_telefone_e_idempotencia(telefone, esperado):
@@ -26,7 +28,7 @@ def test_normalizacao_telefone_e_idempotencia(telefone, esperado):
 @pytest.mark.parametrize("telefone", [
     "", " ", "99999-9999", "abc86999999999", "++5586999999999",
     "55+86999999999", "(00) 99999-9999", "(86) 88888-8888",
-    "+55 86 9999-9999", "5586999999999999", "(86) 99999-9999 ramal 1",
+    "+55 86 999-9999", "5586999999999999", "(86) 99999-9999 ramal 1",
 ])
 def test_telefone_invalido(telefone):
     with pytest.raises(ValueError):
@@ -66,6 +68,23 @@ def test_resposta_invalida_ou_destino_divergente(payload, twilio_request):
     twilio_request.return_value = Response(201, json.dumps(payload))
     with pytest.raises(EnvioIncertoError):
         asyncio.run(gateway().enviar("5586999999999", "Teste"))
+    assert twilio_request.await_count == 1
+
+
+@pytest.mark.parametrize("codigo,esperado", [
+    (20003, "Credenciais"), (63002, "Remetente"), (63007, "Remetente"),
+    (63015, "Sandbox"), (63016, "Janela"), (29999, "Console"),
+])
+def test_rejeicao_twilio_informa_codigo_sem_payload_privado(codigo, esperado, twilio_request):
+    twilio_request.side_effect = None
+    twilio_request.return_value = Response(400, json.dumps({
+        "code": codigo, "message": "detalhe privado", "status": 400,
+    }))
+    with pytest.raises(EnvioError) as erro:
+        asyncio.run(gateway().enviar("5586999999999", "Teste"))
+    assert esperado in str(erro.value)
+    assert f"código Twilio {codigo}" in str(erro.value)
+    assert "privado" not in str(erro.value)
     assert twilio_request.await_count == 1
 
 

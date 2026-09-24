@@ -119,9 +119,11 @@ novas tentativas; nesse caso o log é a evidência disponível.
 
 ## Enviar WhatsApp
 
-Após consultar, confira os dados e a mensagem. Informe o telefone com DDD e
-clique **Enviar WhatsApp**. Entradas como `(86) 99999-9999`, `86 99999-9999`
-e `+55 86 99999-9999` são normalizadas para `5586999999999`, na tela e no backend.
+Após consultar, confira os dados e a mensagem. O campo já mostra o prefixo `+55`;
+informe apenas DDD e número, como `86 3333-4444` ou `86 99999-9999`, e clique
+**Enviar WhatsApp**. O campo aceita também um número completo colado e o apresenta
+no formato nacional. O backend recebe os dígitos internacionais (`5586999999999` no
+exemplo de celular); a Twilio recebe `whatsapp:+5586999999999`.
 A validação é de formato; somente o provedor pode confirmar que há uma conta
 WhatsApp disponível nesse número. O botão fica bloqueado com telefone inválido,
 durante o envio e quando já existe uma tentativa para a execução.
@@ -140,6 +142,13 @@ Para desenvolvimento/demonstração:
 6. Selecione segmento/período, consulte, confira a mensagem gerada e informe
    o telefone que aderiu ao Sandbox. Clique **Enviar WhatsApp**.
 7. Confira o resultado no histórico de envios, acessível ao abrir a execução.
+
+Se a Twilio rejeitar a requisição, o histórico mostra o código retornado e uma
+orientação para códigos conhecidos. Confira o mesmo código no Console da Twilio;
+o texto completo da resposta não é armazenado por poder conter dados privados.
+Uma execução já tentada não é reenviada: após corrigir a causa, faça uma nova
+consulta para gerar uma nova tentativa. Se o status for INCERTO, verifique antes
+no Console se a mensagem foi aceita.
 
 Esta demonstração envia texto livre dentro da janela de atendimento de 24 horas
 aberta por uma mensagem do destinatário (a associação ao Sandbox também abre

@@ -17,16 +17,19 @@ function normalizarTelefone(valor) {
   if (valor.startsWith("whatsapp:")) valor = valor.slice("whatsapp:".length);
   if (!/^\+?[0-9\s()-]+$/.test(valor)) return null;
   let telefone = valor.replace(/[\s()+-]/g, "");
-  const nacional = /^[1-9][0-9](?:9[0-9]{8}|[2-5][0-9]{7})$/;
-  if (!valor.startsWith("+") && nacional.test(telefone)) {
-    telefone = `55${telefone}`;
-  } else if (!valor.startsWith("+") && [10, 11].includes(telefone.length)) {
-    if (!(telefone.length === 11 && telefone.startsWith("1"))) return null;
+  const nacional = /^[1-9][0-9](?:9[0-9]{7,8}|[2-5][0-9]{7})$/;
+  if (telefone.startsWith("55") && [12, 13].includes(telefone.length)) {
+    telefone = telefone.slice(2);
+  } else if (valor.startsWith("+")) {
+    return null;
   }
-  if (telefone.startsWith("55") && !nacional.test(telefone.slice(2))) return null;
-  if (!/^[1-9][0-9]{7,14}$/.test(telefone)) return null;
-  if (!valor.startsWith("+") && telefone.length < 11) return null;
-  return telefone;
+  return nacional.test(telefone) ? `55${telefone}` : null;
+}
+
+function formatarTelefone(telefone) {
+  const nacional = telefone.slice(2);
+  const numero = nacional.slice(2);
+  return `${nacional.slice(0, 2)} ${numero.slice(0, -4)}-${numero.slice(-4)}`;
 }
 
 function validarTelefone() {
@@ -45,8 +48,10 @@ function validarTelefone() {
 telefoneInput.addEventListener("input", validarTelefone);
 telefoneInput.addEventListener("blur", () => {
   const telefone = validarTelefone();
-  if (telefone) telefoneInput.value = telefone.startsWith("55") ? telefone : `+${telefone}`;
+  if (telefone) telefoneInput.value = formatarTelefone(telefone);
 });
+const telefonePadrao = normalizarTelefone(telefoneInput.value);
+if (telefonePadrao) telefoneInput.value = formatarTelefone(telefonePadrao);
 
 const estadosEnvio = {
   ACEITO: "Mensagem aceita pelo WhatsApp. A entrega ao destinatário ainda não foi confirmada.",
@@ -239,7 +244,7 @@ envioForm.addEventListener("submit", async (event) => {
   const telefone = validarTelefone();
   if (!telefone) return;
   const id = execucaoAtual;
-  telefoneInput.value = telefone.startsWith("55") ? telefone : `+${telefone}`;
+  telefoneInput.value = formatarTelefone(telefone);
   enviosEmAndamento.add(id);
   validarTelefone();
   envioForm.setAttribute("aria-busy", "true");
@@ -248,7 +253,7 @@ envioForm.addEventListener("submit", async (event) => {
   try {
     const envio = await lerResposta(await fetch(`/api/consultas/${encodeURIComponent(id)}/envios`, {
       method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({destinatario: telefoneInput.value}),
+      body: JSON.stringify({destinatario: telefone}),
     }));
     enviosBloqueados.add(id);
     if (execucaoAtual === id) aviso.textContent = envio.erro || estadosEnvio[envio.status];

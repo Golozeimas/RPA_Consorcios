@@ -27,7 +27,7 @@ def criar_router(
             "fonte": FONTE, "dataset": DATASET, "metrica": METRICA,
             "segmentos_principais": SEGMENTOS_PRINCIPAIS_BCB,
             "subsegmentos": SUBSEGMENTOS_BCB,
-            "destinatario_padrao": destinatario_padrao,
+            "destinatario_padrao": destinatario_padrao[2:] if destinatario_padrao.startswith("55") else "",
         })
 
     @router.post("/api/consultas", response_model=ExecucaoResponse)

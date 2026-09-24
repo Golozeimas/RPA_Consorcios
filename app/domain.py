@@ -83,7 +83,7 @@ def normalizar_destinatario(valor: str) -> str:
     if not re.fullmatch(r"\+?[0-9\s()-]+", valor):
         raise ValueError("Informe um número de WhatsApp válido.")
     telefone = re.sub(r"[\s()+-]", "", valor)
-    nacional = r"[1-9][0-9](?:9[0-9]{8}|[2-5][0-9]{7})"
+    nacional = r"[1-9][0-9](?:9[0-9]{7,8}|[2-5][0-9]{7})"
     if not valor.startswith("+") and re.fullmatch(nacional, telefone):
         telefone = "55" + telefone
     elif not valor.startswith("+") and len(telefone) in {10, 11}:
@@ -94,7 +94,7 @@ def normalizar_destinatario(valor: str) -> str:
         raise ValueError("Informe um número brasileiro válido com DDD.")
     if not re.fullmatch(r"[1-9][0-9]{7,14}", telefone):
         raise ValueError("Informe um número de WhatsApp válido.")
-    if not valor.startswith("+") and len(telefone) < 11:
+    if not valor.startswith("+") and len(telefone) < 10:
         raise ValueError("Informe o DDD e o número de WhatsApp.")
     return telefone
 
