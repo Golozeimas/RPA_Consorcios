@@ -62,7 +62,9 @@ class PersistenciaError(ConsultaError):
 
 
 class EnvioError(ConsultaError):
-    pass
+    def __init__(self, message: str, error_code: int | None = None) -> None:
+        super().__init__(message)
+        self.error_code = error_code
 
 
 class EnvioIncertoError(EnvioError):
@@ -70,6 +72,13 @@ class EnvioIncertoError(EnvioError):
 
 
 class StatusEnvio(StrEnum):
+    CRIADO = "CRIADO"
+    NA_FILA = "NA_FILA"
+    ENVIADO = "ENVIADO"
+    ENTREGUE = "ENTREGUE"
+    LIDO = "LIDO"
+    FALHOU = "FALHOU"
+    NAO_ENTREGUE = "NAO_ENTREGUE"
     ENVIANDO = "ENVIANDO"
     ACEITO = "ACEITO"
     ERRO = "ERRO"
@@ -105,6 +114,37 @@ class ConfirmacaoEnvio:
     provedor_status: str
     status: StatusEnvio = StatusEnvio.ACEITO
     erro: str | None = None
+    error_code: int | None = None
+    remetente: str | None = None
+    criado_em: datetime | None = None
+    mensagem_enviada: str | None = None
+
+
+@dataclass(frozen=True)
+class EventoEnvio:
+    provedor_id: str
+    provedor_status: str
+    status: StatusEnvio
+    error_code: int | None = None
+    erro: str | None = None
+    event_type: str | None = None
+
+
+def pode_avancar_envio(atual: StatusEnvio, novo: StatusEnvio) -> bool:
+    """Entrega comprovada prevalece; falhas terminais não voltam à fila."""
+    ordem = {StatusEnvio.CRIADO: 0, StatusEnvio.ACEITO: 1, StatusEnvio.NA_FILA: 1,
+             StatusEnvio.ENVIANDO: 2, StatusEnvio.ENVIADO: 3,
+             StatusEnvio.ENTREGUE: 4, StatusEnvio.LIDO: 5}
+    falhas = {StatusEnvio.FALHOU, StatusEnvio.NAO_ENTREGUE, StatusEnvio.ERRO}
+    if atual in {StatusEnvio.ENTREGUE, StatusEnvio.LIDO}:
+        return ordem.get(novo, -1) > ordem[atual]
+    if novo in {StatusEnvio.ENTREGUE, StatusEnvio.LIDO}:
+        return True
+    if atual in falhas:
+        return False
+    if novo in falhas:
+        return True
+    return ordem.get(novo, -1) > ordem.get(atual, -1)
 
 
 @dataclass(frozen=True)
@@ -118,6 +158,17 @@ class Envio:
     provedor_id: str | None = None
     provedor_status: str | None = None
     erro: str | None = None
+    provider: str | None = None
+    initial_status: str | None = None
+    error_code: int | None = None
+    remetente: str | None = None
+    criado_em: datetime | None = None
+    updated_at: datetime | None = None
+    sent_at: datetime | None = None
+    delivered_at: datetime | None = None
+    read_at: datetime | None = None
+    eventos: tuple[dict[str, str | int | bool | None], ...] = ()
+    mensagem_enviada: str | None = None
 
 
 @dataclass(frozen=True)

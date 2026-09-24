@@ -11,6 +11,8 @@ from sqlalchemy import URL, create_engine
 from app.api.routes.consulta import criar_router
 from app.integrations.bcb_client import BCBClient
 from app.integrations.whatsapp_client import WhatsAppClient
+from app.automation.bcb_consorcios import BCBConsorciosRpa
+from app.api.routes.twilio_webhook import criar_webhook_twilio
 from app.core.config import ROOT, Settings
 from app.domain import PersistenciaError
 from app.models.execucao import Base
@@ -41,18 +43,24 @@ def create_app(
         engine, settings.duplicate_seconds, settings.query_timeout_seconds + 30
     )
     http_client = httpx.AsyncClient(transport=http_transport, timeout=settings.http_timeout_seconds)
-    collector = BCBClient(http_client, settings.http_timeout_seconds)
+    collector = (BCBClient(http_client, settings.http_timeout_seconds) if http_transport is not None
+                 else BCBConsorciosRpa(settings.browser_timeout_ms, settings.headless))
     bcb = gateway or BCBService(collector)
     service = ConsultaService(bcb, repository, settings.query_timeout_seconds)
     mercado = ConsultaService(
         mercado_gateway or BCBMercadoService(collector), repository, settings.query_timeout_seconds
     )
+    envio_repository = SQLiteEnvioRepository(engine, settings.http_timeout_seconds * 4 + 30)
     envio = EnvioService(
         message_gateway or WhatsAppClient(
             settings.twilio_account_sid, settings.twilio_auth_token,
             settings.twilio_whatsapp_from, settings.http_timeout_seconds,
+            content_sid=settings.twilio_content_sid,
+            is_production=settings.twilio_production_sender,
+            status_callback_url=settings.twilio_status_callback_url,
+            panorama_content_sid=settings.twilio_panorama_content_sid,
         ),
-        SQLiteEnvioRepository(engine, settings.http_timeout_seconds * 4 + 30),
+        envio_repository,
     )
 
     @asynccontextmanager
@@ -72,6 +80,7 @@ def create_app(
 
     app = FastAPI(title="Consulta pública BCB — Consórcios", lifespan=lifespan)
     app.include_router(criar_router(service, mercado, envio, settings.twilio_whatsapp_to))
+    app.include_router(criar_webhook_twilio(envio, settings))
     app.mount("/static", StaticFiles(directory=ROOT / "app" / "static"), name="static")
 
     @app.exception_handler(PersistenciaError)

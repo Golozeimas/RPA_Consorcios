@@ -1,7 +1,7 @@
 # Consulta pública BCB — Consórcios
 
 MVP Python/FastAPI: API oficial BCB via httpx → validação Pydantic → SQLite
-→ resultado e mensagem → envio explícito pelo SDK Twilio WhatsApp → histórico.
+→ resultado e mensagem → envio explícito por WhatsApp Cloud API ou Twilio → histórico.
 
 ## Executar
 
@@ -35,15 +35,18 @@ vazios usam os padrões abaixo:
 | TWILIO_ACCOUNT_SID | vazio (envio desabilitado até configurar) |
 | TWILIO_AUTH_TOKEN | vazio |
 | TWILIO_WHATSAPP_FROM | vazio; remetente no formato `whatsapp:+<DDI><número>` |
-| TWILIO_WHATSAPP_TO | vazio; destinatário opcional padrão, também no formato `whatsapp:+<DDI><número>` |
+| TWILIO_WHATSAPP_TO | vazio; destinatário opcional padrão |
+| TWILIO_CONTENT_SID | vazio; Content SID pré-aprovado da Twilio para contas Trial/Sandbox |
+| TWILIO_PANORAMA_CONTENT_SID | vazio; Content SID personalizado para template de Automóveis com variáveis |
+| TWILIO_STATUS_CALLBACK_URL | vazio; URL pública HTTPS para receber webhooks de status (ex: ngrok) |
+| TWILIO_VALIDATE_SIGNATURE | `true`; valida a assinatura criptográfica X-Twilio-Signature no webhook |
 
-As três credenciais/remetente `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` e
-`TWILIO_WHATSAPP_FROM` devem ser configuradas juntas em `.env`.
-Nunca versione esse arquivo. Configuração parcial ou inválida impede a inicialização.
-`TWILIO_WHATSAPP_TO` é opcional e apenas preenche o campo de destinatário na tela;
-o usuário ainda pode editar o número antes do envio. O valor aceita `whatsapp:+...`
-ou o telefone internacional e é normalizado ao iniciar a aplicação. O destinatário
-efetivamente escolhido continua sendo validado pelo backend e registrado no histórico.
+As credenciais `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` e `TWILIO_WHATSAPP_FROM` devem ser
+configuradas juntas em `.env`. Nunca versione esse arquivo. Configuração parcial ou inválida impede a inicialização.
+`TWILIO_WHATSAPP_TO` é opcional e preenche o campo de destinatário na tela.
+`TWILIO_STATUS_CALLBACK_URL` permite que a Twilio envie atualizações de entrega (`sent`, `delivered`, `read`, `failed`).
+Para desenvolvimento local com webhook, utilize um túnel HTTPS (como `ngrok http 8766`) e configure a URL completa:
+`https://<subdominio>.ngrok-free.app/webhooks/twilio/message-status`.
 As variáveis `BROWSER_*` são usadas somente pelo adaptador de navegador legado.
 Bootstrap 5 é carregado por CDN; o formulário e o JavaScript local não dependem
 de JavaScript do Bootstrap. A consulta requer acesso ao domínio Olinda.
@@ -90,7 +93,7 @@ Veja [o mapeamento e a investigação](docs/CONSULTA_BCB.md).
 - `app/services`: caso de uso, transformação BCB e portas injetadas.
 - `app/domain.py`: entidades, estados, identidade normalizada e erros.
 - `app/automation`: adaptador Playwright.
-- `app/integrations`: cliente HTTP BCB e adaptador do SDK Twilio; sem regras de negócio nas rotas.
+- `app/integrations`: cliente HTTP BCB e adaptadores Meta/Twilio; sem regras de negócio nas rotas.
 - `app/models`, `repositories`: infraestrutura SQLAlchemy/SQLite, seguindo as pastas existentes.
 - `app/main.py`: composição das dependências e ciclo de vida.
 
@@ -120,15 +123,41 @@ novas tentativas; nesse caso o log é a evidência disponível.
 ## Enviar WhatsApp
 
 Após consultar, confira os dados e a mensagem. O campo já mostra o prefixo `+55`;
-informe apenas DDD e número, como `86 3333-4444` ou `86 99999-9999`, e clique
+informe apenas DDD e número, como `86 3333-4444` ou `86 9442-3074`, e clique
 **Enviar WhatsApp**. O campo aceita também um número completo colado e o apresenta
-no formato nacional. O backend recebe os dígitos internacionais (`5586999999999` no
-exemplo de celular); a Twilio recebe `whatsapp:+5586999999999`.
+no formato nacional. O backend recebe os dígitos internacionais (`558694423074` no
+exemplo de celular) e a Twilio recebe `whatsapp:+558694423074`.
 A validação é de formato; somente o provedor pode confirmar que há uma conta
 WhatsApp disponível nesse número. O botão fica bloqueado com telefone inválido,
 durante o envio e quando já existe uma tentativa para a execução.
 A aplicação envia a mensagem salva, não um
 texto arbitrário recebido do navegador. A consulta nunca dispara envio sozinha.
+
+### Integração oficial Twilio WhatsApp
+
+O envio utiliza o SDK oficial da Twilio (`twilio.rest.Client`) de forma assíncrona.
+
+1. **Ciclo Completo e Rastreabilidade**:
+   - `CRIADO` / `NA_FILA`: A Twilio aceitou a requisição e retornou o `MessageSid` (ex: `SM...` ou `MM...`).
+   - `ENVIANDO` / `ENVIADO`: A mensagem foi transmitida à rede celular / WhatsApp.
+   - `ENTREGUE`: O aparelho do destinatário confirmou o recebimento da mensagem (`delivered`).
+   - `LIDO`: O destinatário abriu/leu a mensagem (`read`), quando habilitado no WhatsApp.
+   - `FALHOU` / `NAO_ENTREGUE`: Falha na entrega, registrando o `ErrorCode` oficial da Twilio no histórico.
+
+2. **Status Callback e Webhook**:
+   - Endpoint: `POST /webhooks/twilio/message-status`.
+   - Aceita payload oficial `application/x-www-form-urlencoded`.
+   - Valida assinatura criptográfica (`X-Twilio-Signature`) via `RequestValidator`.
+   - Registra transições de forma monotônica (impedindo que eventos fora de ordem sobrescrevam estados finais).
+   - Registra timestamps reais observados: `sent_at`, `delivered_at`, `read_at`.
+
+3. **Para desenvolvimento / Sandbox**:
+   - Obtenha `TWILIO_ACCOUNT_SID` e `TWILIO_AUTH_TOKEN` no Console Twilio.
+   - Remetente: `TWILIO_WHATSAPP_FROM=whatsapp:+17372508034` (ou o número Sandbox de sua conta).
+   - O destinatário deve enviar a palavra-chave de adesão (ex: `join <code>`) para o remetente do Sandbox.
+   - Para ambientes Trial com template pré-aprovado, configure `TWILIO_CONTENT_SID=HXfe5ab5f00277942d4d4200328b4d403c`.
+
+
 Para desenvolvimento/demonstração:
 
 1. Crie sua conta Twilio e obtenha Account SID e Auth Token no Console.
@@ -153,17 +182,54 @@ no Console se a mensagem foi aceita.
 Esta demonstração envia texto livre dentro da janela de atendimento de 24 horas
 aberta por uma mensagem do destinatário (a associação ao Sandbox também abre
 essa janela). Fora dela, envie uma nova mensagem ao remetente antes de demonstrar.
-Templates Twilio não fazem parte deste fluxo. O Sandbox exige nova associação
+O fluxo **Try out WhatsApp** de uma conta trial nova aceita somente os templates
+fornecidos pela Twilio e exige `ContentSid`; ele não permite a mensagem personalizada
+gerada pela consulta. Para demonstrar esse envio, é necessário atualizar a conta,
+configurar um remetente WhatsApp habilitado e manter aberta a janela
+de atendimento. Usar o `ContentSid` do lembrete enviaria o lembrete novamente.
+Sem `TWILIO_PANORAMA_CONTENT_SID`, o envio usa o texto salvo como `Body`.
+Para usar o template de Automóveis, cadastre exatamente o texto abaixo na Twilio
+e configure o SID correspondente em `TWILIO_PANORAMA_CONTENT_SID` no `.env`.
+O SID deve pertencer a esse template, habilitado para WhatsApp na conta;
+não reutilize o SID do lembrete. Reinicie a aplicação e faça uma nova consulta.
+Nesse modo, o SDK recebe `ContentSid` e `ContentVariables`, sem `Body`.
+Outros segmentos e mensagens antigas incompatíveis são rejeitados antes do envio.
+Os seis valores são extraídos da mensagem persistida, que corresponde à prévia;
+indicadores ausentes aparecem como “Não disponível”.
+
+```text
+Olá! 👋
+
+Consultei os dados agregados do Banco Central sobre consórcios de automóveis.
+
+📊 Panorama do mercado
+
+Período: {{1}}
+Cotas ativas: {{2}}
+Crédito médio: {{3}}
+Prazo médio: {{4}}
+Taxa média de administração: {{5}}
+Contemplações (cotas ativas, últimos 12 meses): {{6}}
+
+Fonte: Banco Central do Brasil  Dados Agregados do Segmento de Consórcios.
+```
+
+As variáveis recebem, respectivamente, período com trimestre, quantidade de cotas,
+crédito em reais, prazo em meses, taxa percentual e quantidade de contemplações.
+O uso do template personalizado depende das permissões e aprovações da conta;
+essa configuração não remove as restrições do trial Try out WhatsApp.
+`TWILIO_CONTENT_SID` não é utilizado, mesmo se ainda estiver no `.env`;
+remova essa variável de configurações antigas. O Sandbox exige nova associação
 quando a sessão expira. Consulte no guia oficial as limitações vigentes da conta
 e de entrega por país.
 
 `POST /api/consultas/{id}/envios` recebe `{"destinatario":"(86) 99999-9999"}`.
 O ID da execução identifica a mensagem persistida; não é necessário reenviá-la
-pelo navegador. As credenciais e a chamada ao SDK Twilio ficam somente no servidor.
+pelo navegador. As credenciais e a chamada ao provedor ficam somente no servidor.
 `GET /api/consultas/{id}/envios` exibe o histórico, também acessível pelos detalhes
 da consulta na tela. A tabela adicional `envios` é criada sem alterar ou apagar
-as consultas existentes. Guarda destinatário, mensagem, datas, status, Message SID,
-status inicial da Twilio, erro e contador de tentativas repetidas.
+as consultas existentes. Guarda destinatário, mensagem, datas, status, ID e
+status inicial do provedor, erro e contador de tentativas repetidas.
 
 Uma reserva transacional por execução, além da unicidade existente
 `(execucao_id, destinatario)`, impede envios concorrentes/repetidos, inclusive após
@@ -173,27 +239,26 @@ pode originar um novo envio; a janela de duplicidade da consulta continua valend
 Não há retries automáticos. Para corrigir falhas definitivas, ajuste a configuração
 e faça uma nova consulta; antes disso, confira o histórico.
 
-Estados: ENVIANDO, ACEITO, ERRO e INCERTO. ACEITO exige ID válido devolvido pela
-Twilio e não significa entregue/lido; não implementamos webhooks de entrega.
+Estados: ENVIANDO, ACEITO, ERRO e INCERTO. ACEITO exige ID válido devolvido pelo
+provedor e não significa entregue/lido; não implementamos webhooks de entrega.
 Timeout, HTTP 5xx ou resposta inválida ficam INCERTO. Interrupção abrupta ou falha
 ao salvar deixa a reserva bloqueada; uma tentativa repetida após o prazo converte
 ENVIANDO em INCERTO. Verifique no provedor antes de iniciar outro envio.
 
 A tabela `envios` recebe somente a coluna opcional `provedor_status` na
 inicialização. A migração é aditiva e preserva histórico e identificadores antigos.
-O campo `provedor_id` guarda o Message SID, e `provedor_status` registra o
-estado devolvido na criação (por exemplo, `queued`), sem acompanhamento posterior.
-O SDK usa `Client.messages.create_async`, timeout explícito, sessão encerrada
-após cada envio e nenhum retry automático. `httpx` permanece para o BCB.
+O campo `provedor_id` guarda o ID da mensagem, e `provedor_status` registra o
+estado devolvido na criação (por exemplo, `accepted` ou `queued`), sem
+acompanhamento posterior. A Meta usa o cliente `httpx` compartilhado e timeout
+configurado; o SDK Twilio usa `Client.messages.create_async`, timeout explícito
+e sessão encerrada após cada envio. Nenhum adaptador faz retry automático.
 
 ## Decisão arquitetural
 
-A Twilio foi adotada como camada de integração com o WhatsApp por oferecer
-uma API e SDK Python de integração simples, configuração adequada para
-demonstrações através do Twilio Sandbox e menor complexidade operacional
-para o escopo deste desafio técnico. A abstração do serviço de mensagens
-permite que a integração seja substituída futuramente por outro provedor,
-como a Meta WhatsApp Cloud API, sem afetar o fluxo principal do RPA.
+A porta de mensagens permite escolher Meta WhatsApp Cloud API ou Twilio por
+configuração, sem mudar o fluxo de consulta, persistência e histórico. A Meta
+envia o texto gerado; a Twilio preserva a integração anterior e seu modo de
+template de Automóveis.
 
 ## Verificação
 

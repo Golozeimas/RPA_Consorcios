@@ -19,8 +19,19 @@ class EnvioResponse(BaseModel):
     execucao_id: str
     destinatario: str
     mensagem: str
+    mensagem_enviada: str | None = None
     status: StatusEnvio
     data_hora: AwareDatetime
     provedor_id: str | None
     provedor_status: str | None = None
     erro: str | None
+    provider: str | None = None
+    initial_status: str | None = None
+    error_code: int | None = None
+    remetente: str | None = None
+    criado_em: AwareDatetime | None = None
+    updated_at: AwareDatetime | None = None
+    sent_at: AwareDatetime | None = None
+    delivered_at: AwareDatetime | None = None
+    read_at: AwareDatetime | None = None
+    eventos: list[dict[str, str | int | bool | None]] = Field(default_factory=list)

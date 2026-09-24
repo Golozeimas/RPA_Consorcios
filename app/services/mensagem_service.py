@@ -4,6 +4,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from datetime import timezone
 
 from app.domain import ConsorcioResultado, DATASET, PanoramaResultado, Resultado
+from app.services.mensagem_automoveis import TEXTO_AUTOMOVEIS
 
 
 def _inteiro_br(valor: int | None) -> str:
@@ -30,11 +31,22 @@ def gerar_mensagem(resultado: ConsorcioResultado | PanoramaResultado | Resultado
                 f"Fonte: {resultado.fonte}\n"
                 f"Consulta realizada em: {resultado.consultado_em:%d/%m/%Y %H:%M} UTC")
     if isinstance(resultado, PanoramaResultado):
+        trimestre = int(resultado.periodo_referencia[-2:]) // 3
+        if resultado.segmento == "Automóveis":
+            return TEXTO_AUTOMOVEIS.format(
+                periodo=f"{resultado.periodo_referencia} ({trimestre}º trimestre)",
+                cotas_ativas=_inteiro_br(resultado.cotas_ativas),
+                credito_medio=_moeda_br(resultado.credito_medio),
+                prazo_medio=(f"{_decimal_br(resultado.prazo_medio).removesuffix(',00')} meses"
+                             if resultado.prazo_medio is not None else "Não disponível"),
+                taxa_administracao=(f"{_decimal_br(resultado.taxa_administracao_media)}%"
+                                    if resultado.taxa_administracao_media is not None else "Não disponível"),
+                contemplacoes=_inteiro_br(resultado.contemplacoes),
+            )
         assunto = (
             "o mercado de consórcios" if resultado.segmento == "Total"
             else f"consórcios de {resultado.segmento.lower()}"
         )
-        trimestre = int(resultado.periodo_referencia[-2:]) // 3
         linhas = [
             "Olá! 👋", "",
             f"Consultei os dados agregados do Banco Central sobre {assunto}.", "",

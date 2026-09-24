@@ -91,10 +91,10 @@ def test_indicadores_opcionais_ausentes_nao_invalidam_consulta():
     assert resultado.campos_indisponiveis == ["credito_medio", "prazo_medio", "taxa_administracao_media", "contemplacoes"]
     mensagem = gerar_mensagem(resultado)
     assert "Cotas ativas: 5.558.340" in mensagem
-    assert "Crédito médio:" not in mensagem
-    assert "Prazo médio:" not in mensagem
-    assert "Taxa média de administração:" not in mensagem
-    assert "Contemplações" not in mensagem
+    assert "Crédito médio: Não disponível" in mensagem
+    assert "Prazo médio: Não disponível" in mensagem
+    assert "Taxa média de administração: Não disponível" in mensagem
+    assert "Contemplações (cotas ativas, últimos 12 meses): Não disponível" in mensagem
 
 
 @pytest.mark.parametrize("segmento,codigo,nome,valor", [

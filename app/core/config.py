@@ -22,11 +22,28 @@ class Settings:
     twilio_auth_token: str = field(default="", repr=False)
     twilio_whatsapp_from: str = ""
     twilio_whatsapp_to: str = ""
+    twilio_panorama_content_sid: str = ""
+    twilio_content_sid: str = ""
+    twilio_production_sender: bool = False
+    twilio_status_callback_url: str = ""
+    twilio_validate_signature: bool = True
 
     def __post_init__(self) -> None:
         if min(self.browser_timeout_ms, self.query_timeout_seconds, self.duplicate_seconds, self.http_timeout_seconds) <= 0:
             raise ValueError("Os tempos de configuração devem ser positivos.")
+        if self.twilio_status_callback_url:
+            from urllib.parse import urlsplit
+            url = urlsplit(self.twilio_status_callback_url)
+            if (url.scheme != "https" or not url.hostname or url.username or url.password
+                    or url.query or url.fragment or url.path != "/webhooks/twilio/message-status"):
+                raise ValueError("TWILIO_STATUS_CALLBACK_URL deve ser HTTPS e terminar em /webhooks/twilio/message-status, sem query.")
         credenciais = (self.twilio_account_sid, self.twilio_auth_token, self.twilio_whatsapp_from)
+        sid = self.twilio_content_sid or self.twilio_panorama_content_sid
+        if sid:
+            if not re.fullmatch(r"HX[0-9a-fA-F]{32}", sid):
+                raise ValueError("TWILIO_CONTENT_SID deve ser um Content SID válido (HX).")
+            if not all(credenciais):
+                raise ValueError("Configure as credenciais Twilio para usar TWILIO_CONTENT_SID.")
         if any(credenciais) and not all(credenciais):
             raise ValueError("Configure TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN e TWILIO_WHATSAPP_FROM juntos.")
         if self.twilio_account_sid and not re.fullmatch(r"AC[0-9a-fA-F]{32}", self.twilio_account_sid):
@@ -47,9 +64,16 @@ class Settings:
         headless = (os.getenv("BROWSER_HEADLESS") or "true").lower()
         if headless not in {"true", "false"}:
             raise ValueError("BROWSER_HEADLESS deve ser true ou false.")
+        validate_signature = (os.getenv("TWILIO_VALIDATE_SIGNATURE") or "true").strip().lower()
+        if validate_signature not in {"true", "false"}:
+            raise ValueError("TWILIO_VALIDATE_SIGNATURE deve ser true ou false.")
         destinatario = (os.getenv("TWILIO_WHATSAPP_TO") or "").strip()
         if destinatario:
             destinatario = normalizar_destinatario(destinatario)
+        content_sid = (os.getenv("TWILIO_CONTENT_SID") or os.getenv("TWILIO_PANORAMA_CONTENT_SID") or "").strip()
+        production_sender = (os.getenv("TWILIO_PRODUCTION_SENDER") or "false").strip().lower()
+        if production_sender not in {"true", "false"}:
+            raise ValueError("TWILIO_PRODUCTION_SENDER deve ser true ou false.")
         return cls(
             database_path=Path(os.getenv("DATABASE_PATH") or ROOT / "data" / "consultas.sqlite3"),
             browser_timeout_ms=int(os.getenv("BROWSER_TIMEOUT_MS") or "30000"),
@@ -61,4 +85,10 @@ class Settings:
             twilio_auth_token=(os.getenv("TWILIO_AUTH_TOKEN") or "").strip(),
             twilio_whatsapp_from=(os.getenv("TWILIO_WHATSAPP_FROM") or "").strip(),
             twilio_whatsapp_to=destinatario,
+            twilio_panorama_content_sid=content_sid,
+            twilio_content_sid=content_sid,
+            twilio_production_sender=production_sender == "true",
+            twilio_status_callback_url=(os.getenv("TWILIO_STATUS_CALLBACK_URL") or "").strip(),
+            twilio_validate_signature=validate_signature == "true",
         )
+

@@ -54,11 +54,20 @@ const telefonePadrao = normalizarTelefone(telefoneInput.value);
 if (telefonePadrao) telefoneInput.value = formatarTelefone(telefonePadrao);
 
 const estadosEnvio = {
-  ACEITO: "Mensagem aceita pelo WhatsApp. A entrega ao destinatário ainda não foi confirmada.",
-  ENVIANDO: "Envio em processamento ou aguardando confirmação. Não repita o envio.",
+  CRIADO: "Mensagem criada no provedor.",
+  ACEITO: "Mensagem aceita pelo provedor.",
+  NA_FILA: "Na fila de envio do WhatsApp.",
+  ENVIANDO: "Envio em processamento.",
+  ENVIADO: "Enviado à operadora / rede WhatsApp.",
+  ENTREGUE: "Entregue ao WhatsApp do destinatário.",
+  LIDO: "Mensagem lida pelo destinatário.",
+  FALHOU: "Falha no envio pelo provedor.",
+  NAO_ENTREGUE: "Não entregue ao destinatário.",
   INCERTO: "Resultado incerto. Verifique no provedor antes de tentar outro envio.",
   ERRO: "Falha no envio.",
 };
+
+let pollingEnvioTimeout = null;
 
 async function atualizarEnvios(id) {
   try {
@@ -69,10 +78,30 @@ async function atualizarEnvios(id) {
     validarTelefone();
     const lista = document.getElementById("envio-historico");
     lista.replaceChildren();
+    let possuiPendente = false;
     for (const envio of envios) {
+      if (["NA_FILA", "ENVIANDO", "ENVIADO", "ACEITO"].includes(envio.status)) {
+        possuiPendente = true;
+      }
       const item = document.createElement("li");
-      item.textContent = `${new Date(envio.data_hora).toLocaleString("pt-BR")} — ***${envio.destinatario.slice(-4)} — ${envio.erro || estadosEnvio[envio.status]}${envio.provedor_id ? ` — ID: ${envio.provedor_id}` : ""}`;
+      const descricaoStatus = estadosEnvio[envio.status] || envio.status;
+      let statusFormatado = descricaoStatus;
+      if (envio.error_code === 21654 || (envio.erro && envio.erro.includes("21654"))) {
+        statusFormatado += " — [Twilio 21654: Ambiente Try out WhatsApp limitado a templates permitidos]";
+      } else if (envio.erro) {
+        statusFormatado += ` — ${envio.erro}`;
+      }
+      if (envio.mensagem_enviada) {
+        statusFormatado += ` — Enviado: ${envio.mensagem_enviada}`;
+      }
+      item.textContent = `${new Date(envio.data_hora).toLocaleString("pt-BR")} — ***${envio.destinatario.slice(-4)} — ${statusFormatado}${envio.provedor_id ? ` — ID: ${envio.provedor_id}` : ""}`;
       lista.append(item);
+    }
+    if (possuiPendente) {
+      if (pollingEnvioTimeout) clearTimeout(pollingEnvioTimeout);
+      pollingEnvioTimeout = setTimeout(() => {
+        if (execucaoAtual === id) atualizarEnvios(id);
+      }, 3000);
     }
   } catch {
     if (execucaoAtual === id) document.getElementById("envio-estado").textContent = "Não foi possível carregar o histórico de envios.";
@@ -162,7 +191,7 @@ function mostrarExecucao(execucao) {
     }
     atualizarEnvios(execucao.id);
     resultado.hidden = false;
-    mostrarEstado("Consulta concluída.", "success");
+    mostrarEstado("Consulta realizada e mensagem gerada com sucesso.", "success");
   } else if (execucao.status === "SEM_RESULTADO") {
     mostrarEstado("Nenhum dado foi encontrado para os filtros selecionados.", "warning");
   } else if (execucao.status === "PROCESSANDO") {
@@ -256,10 +285,21 @@ envioForm.addEventListener("submit", async (event) => {
       body: JSON.stringify({destinatario: telefone}),
     }));
     enviosBloqueados.add(id);
-    if (execucaoAtual === id) aviso.textContent = envio.erro || estadosEnvio[envio.status];
+    if (execucaoAtual === id) {
+      if (envio.status === "FALHOU" || envio.erro) {
+        if (envio.error_code === 21654 || (envio.erro && envio.erro.includes("21654"))) {
+          aviso.innerHTML = '<span class="text-danger"><strong>Não foi possível realizar o envio pelo WhatsApp.</strong></span><br><small class="text-muted">O ambiente de demonstração da Twilio (Try out WhatsApp) está limitado aos templates de teste permitidos (ContentSid).</small>';
+        } else {
+          aviso.innerHTML = `<span class="text-danger"><strong>Não foi possível realizar o envio pelo WhatsApp.</strong></span><br><small class="text-muted">${envio.erro || estadosEnvio[envio.status] || envio.status}</small>`;
+        }
+      } else {
+        aviso.innerHTML = `<span class="text-success"><strong>Envio despachado com sucesso!</strong></span> ${envio.provedor_id ? `(ID Twilio: ${envio.provedor_id})` : ""}`;
+      }
+    }
   } catch (error) {
-    if (execucaoAtual === id) aviso.textContent = error instanceof TypeError
-      ? "Falha de conexão. Consulte o histórico antes de tentar novamente." : error.message;
+    if (execucaoAtual === id) {
+      aviso.innerHTML = `<span class="text-danger"><strong>Não foi possível realizar o envio pelo WhatsApp:</strong></span> ${error instanceof TypeError ? "Falha de conexão. Consulte o histórico antes de tentar novamente." : error.message}`;
+    }
   } finally {
     enviosEmAndamento.delete(id);
     historicosCarregados.delete(id);

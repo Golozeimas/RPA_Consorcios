@@ -32,12 +32,189 @@ ENTRADA = {"segmento": "Automóveis", "periodo": "2026-06"}
 DESTINO = {"destinatario": "+1 (555) 000-0001"}
 
 
+@pytest.mark.parametrize("sem_opcionais", [False, True])
+def test_template_automoveis_mapeia_consulta_e_preserva_historico(tmp_path, twilio_request, sem_opcionais):
+    config = replace(settings(tmp_path), twilio_panorama_content_sid="HX" + "a" * 32)
+    payload = {"value": [BCB_PAYLOAD["value"][0]]} if sem_opcionais else BCB_PAYLOAD
+    with TestClient(create_app(config, http_transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json=payload)
+    ))) as client:
+        consulta = client.post("/api/consultas/mercado", json=ENTRADA).json()
+        rota = f"/api/consultas/{consulta['id']}/envios"
+        envio = client.post(rota, json=DESTINO).json()
+        assert envio["status"] == "NA_FILA"
+        requisicao = twilio_request.call_args.kwargs["data"]
+        assert requisicao["ContentSid"] == config.twilio_panorama_content_sid
+        assert "Body" not in requisicao
+        variaveis = json.loads(requisicao["ContentVariables"])
+        assert variaveis == {
+            "1": "2026-06 (2º trimestre)", "2": "5.558.340",
+            "3": "Não disponível" if sem_opcionais else "R$ 75.950,00",
+            "4": "Não disponível" if sem_opcionais else "90 meses",
+            "5": "Não disponível" if sem_opcionais else "15,16%",
+            "6": "Não disponível" if sem_opcionais else "818.740",
+        }
+        assert envio["mensagem"] == consulta["mensagem_gerada"]
+        for valor in variaveis.values():
+            assert valor in envio["mensagem"]
+        assert client.get(rota).json() == [envio]
+        assert client.post(rota, json=DESTINO).json() == envio
+        assert twilio_request.await_count == 1
+
+
+def test_template_automoveis_bloqueia_outro_segmento(tmp_path, twilio_request):
+    config = replace(settings(tmp_path), twilio_panorama_content_sid="HX" + "a" * 32)
+    with TestClient(create_app(config, http_transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json=BCB_PAYLOAD)
+    ))) as client:
+        consulta = client.post("/api/consultas/mercado", json={**ENTRADA, "segmento": "Imóveis"}).json()
+        envio = client.post(f"/api/consultas/{consulta['id']}/envios", json=DESTINO).json()
+        assert envio["status"] == "ERRO"
+        assert "Automóveis" in envio["erro"]
+        twilio_request.assert_not_awaited()
+
+
 def settings(tmp_path):
     return Settings(database_path=tmp_path / "http.sqlite3", twilio_auth_token="token-ficticio-de-teste",
-                    twilio_account_sid="AC" + "0" * 32, twilio_whatsapp_from="whatsapp:+15550000002")
+                    twilio_account_sid="AC" + "0" * 32, twilio_whatsapp_from="whatsapp:+15550000002",
+                    twilio_production_sender=True)
 
 
-def test_fluxo_http_validacao_mensagem_envio_historico_e_duplicidade(tmp_path, twilio_request):
+def test_twilio_envia_mensagem_da_consulta_e_bloqueia_duplicidade(tmp_path, twilio_request):
+    config = settings(tmp_path)
+    with TestClient(create_app(config, http_transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json=BCB_PAYLOAD)
+    ))) as client:
+        consulta = client.post("/api/consultas/mercado", json=ENTRADA).json()
+        assert consulta["status"] == "SUCESSO"
+        rota = f"/api/consultas/{consulta['id']}/envios"
+        envio = client.post(rota, json={"destinatario": "+55 86 9442-3074"}).json()
+        assert envio["status"] == "NA_FILA"
+        assert envio["provedor_id"] == "SM" + "1" * 32
+        assert envio["provedor_status"] == "queued"
+        assert envio["provider"] == "twilio"
+        assert envio["initial_status"] == "queued"
+        assert envio["mensagem"] == consulta["mensagem_gerada"]
+        # Segundo disparo é bloqueado pela proteção de idempotência
+        assert client.post(rota, json=DESTINO).json() == envio
+        assert client.get(rota).json() == [envio]
+        assert twilio_request.await_count == 1
+
+
+def test_twilio_status_callback_fluxo_completo_e_ordem_de_eventos(tmp_path, twilio_request):
+    config = replace(settings(tmp_path), twilio_validate_signature=False)
+    with TestClient(create_app(config, http_transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json=BCB_PAYLOAD)
+    ))) as client:
+        consulta = client.post("/api/consultas/mercado", json=ENTRADA).json()
+        rota = f"/api/consultas/{consulta['id']}/envios"
+        envio = client.post(rota, json=DESTINO).json()
+        sid = envio["provedor_id"]
+        assert envio["status"] == "NA_FILA"
+
+        # 1. Evento: sent -> ENVIADO
+        resp = client.post("/webhooks/twilio/message-status", data={
+            "MessageSid": sid, "MessageStatus": "sent", "AccountSid": config.twilio_account_sid,
+        }, headers={"Content-Type": "application/x-www-form-urlencoded"})
+        assert resp.status_code == 204
+        atualizado = client.get(rota).json()[0]
+        assert atualizado["status"] == "ENVIADO"
+        assert atualizado["sent_at"] is not None
+
+        # 2. Evento: delivered -> ENTREGUE
+        resp = client.post("/webhooks/twilio/message-status", data={
+            "MessageSid": sid, "MessageStatus": "delivered", "AccountSid": config.twilio_account_sid,
+        }, headers={"Content-Type": "application/x-www-form-urlencoded"})
+        assert resp.status_code == 204
+        atualizado = client.get(rota).json()[0]
+        assert atualizado["status"] == "ENTREGUE"
+        assert atualizado["delivered_at"] is not None
+
+        # 3. Evento: read -> LIDO
+        resp = client.post("/webhooks/twilio/message-status", data={
+            "MessageSid": sid, "EventType": "read", "AccountSid": config.twilio_account_sid,
+        }, headers={"Content-Type": "application/x-www-form-urlencoded"})
+        assert resp.status_code == 204
+        atualizado = client.get(rota).json()[0]
+        assert atualizado["status"] == "LIDO"
+        assert atualizado["read_at"] is not None
+
+        # 4. Evento fora de ordem atrasado (sent após read) não deve regredir
+        resp = client.post("/webhooks/twilio/message-status", data={
+            "MessageSid": sid, "MessageStatus": "sent", "AccountSid": config.twilio_account_sid,
+        }, headers={"Content-Type": "application/x-www-form-urlencoded"})
+        assert resp.status_code == 204
+        assert client.get(rota).json()[0]["status"] == "LIDO"
+
+
+def test_twilio_status_callback_failed_undelivered_e_validacoes(tmp_path, twilio_request):
+    config = replace(settings(tmp_path), twilio_validate_signature=False)
+    with TestClient(create_app(config, http_transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json=BCB_PAYLOAD)
+    ))) as client:
+        consulta = client.post("/api/consultas/mercado", json=ENTRADA).json()
+        rota = f"/api/consultas/{consulta['id']}/envios"
+        envio = client.post(rota, json=DESTINO).json()
+        sid = envio["provedor_id"]
+
+        # Callback com falha e ErrorCode
+        resp = client.post("/webhooks/twilio/message-status", data={
+            "MessageSid": sid, "MessageStatus": "failed", "ErrorCode": "63015",
+            "AccountSid": config.twilio_account_sid,
+        }, headers={"Content-Type": "application/x-www-form-urlencoded"})
+        assert resp.status_code == 204
+        atualizado = client.get(rota).json()[0]
+        assert atualizado["status"] == "FALHOU"
+        assert atualizado["error_code"] == 63015
+        assert "Sandbox" in atualizado["erro"]
+
+        # Content-type incorreto
+        assert client.post("/webhooks/twilio/message-status", json={"MessageSid": sid}).status_code == 415
+
+        # MessageSid inexistente
+        assert client.post("/webhooks/twilio/message-status", data={
+            "MessageSid": "SM" + "9" * 32, "MessageStatus": "delivered",
+        }, headers={"Content-Type": "application/x-www-form-urlencoded"}).status_code == 404
+
+        # AccountSid divergente
+        assert client.post("/webhooks/twilio/message-status", data={
+            "MessageSid": sid, "MessageStatus": "delivered", "AccountSid": "AC" + "9" * 32,
+        }, headers={"Content-Type": "application/x-www-form-urlencoded"}).status_code == 403
+
+
+def test_twilio_status_callback_assinatura_valida(tmp_path, twilio_request):
+    from twilio.request_validator import RequestValidator
+    config = replace(
+        settings(tmp_path),
+        twilio_status_callback_url="https://api.meudominio.com/webhooks/twilio/message-status",
+        twilio_validate_signature=True,
+    )
+    with TestClient(create_app(config, http_transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json=BCB_PAYLOAD)
+    ))) as client:
+        consulta = client.post("/api/consultas/mercado", json=ENTRADA).json()
+        rota = f"/api/consultas/{consulta['id']}/envios"
+        envio = client.post(rota, json=DESTINO).json()
+        sid = envio["provedor_id"]
+
+        # Requisição sem assinatura válida é recusada com 403
+        dados = {"MessageSid": sid, "MessageStatus": "delivered", "AccountSid": config.twilio_account_sid}
+        assert client.post("/webhooks/twilio/message-status", data=dados,
+                           headers={"Content-Type": "application/x-www-form-urlencoded"}).status_code == 403
+
+        # Requisição com assinatura calculada pelo RequestValidator é aceita com 204
+        validator = RequestValidator(config.twilio_auth_token)
+        signature = validator.compute_signature(config.twilio_status_callback_url, dados)
+        assert client.post("/webhooks/twilio/message-status", data=dados, headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "X-Twilio-Signature": signature,
+        }).status_code == 204
+        assert client.get(rota).json()[0]["status"] == "ENTREGUE"
+
+
+
+def test_fluxo_http_validacao_mensagem_envio_historico_e_duplicidade(tmp_path, twilio_request, monkeypatch):
+    monkeypatch.setenv("TWILIO_CONTENT_SID", "HX" + "f" * 32)
     requests = []
 
     def handler(request):
@@ -60,13 +237,14 @@ def test_fluxo_http_validacao_mensagem_envio_historico_e_duplicidade(tmp_path, t
         twilio_request.assert_not_awaited()  # Consultar não envia automaticamente.
         rota = f"/api/consultas/{consulta['id']}/envios"
         envio = client.post(rota, json=DESTINO).json()
-        assert envio["status"] == "ACEITO"
+        assert envio["status"] == "NA_FILA"
         assert envio["provedor_id"] == "SM" + "1" * 32
         assert envio["provedor_status"] == "queued"
         payload = twilio_request.call_args.kwargs["data"]
         assert payload["To"] == "whatsapp:+15550000001"
         assert payload["From"] == config.twilio_whatsapp_from
         assert payload["Body"] == consulta["mensagem_gerada"]
+        assert "ContentSid" not in payload
         assert envio["mensagem"] == consulta["mensagem_gerada"]
         assert client.post(rota, json={"destinatario": "15550000001"}).json() == envio
         assert client.post(rota, json={"destinatario": "(86) 99999-9999"}).json() == envio
@@ -296,7 +474,7 @@ def test_twilio_telefone_brasileiro_e_segredo_nao_exposto(tmp_path, twilio_reque
         twilio_request.assert_not_awaited()
         response = client.post(rota, json={"destinatario": "(86) 99999-9999"})
         envio = response.json()
-        assert envio["status"] == "ACEITO"
+        assert envio["status"] == "NA_FILA"
         assert envio["destinatario"] == "5586999999999"
         assert envio["mensagem"] == consulta["mensagem_gerada"]
         assert twilio_request.call_args.kwargs["data"]["To"] == "whatsapp:+5586999999999"
@@ -319,7 +497,7 @@ def test_falha_retornada_pela_twilio_preserva_sid_e_status(tmp_path, twilio_requ
         consulta = client.post("/api/consultas/mercado", json=ENTRADA).json()
         rota = f"/api/consultas/{consulta['id']}/envios"
         envio = client.post(rota, json=DESTINO).json()
-        assert envio["status"] == "ERRO"
+        assert envio["status"] == "FALHOU"
         assert envio["provedor_status"] == "failed"
         assert envio["provedor_id"] == "SM" + "2" * 32
         assert "privado" not in envio["erro"]
@@ -351,3 +529,94 @@ def test_migracao_preserva_envio_anterior_e_pode_reiniciar(tmp_path):
                 assert client.post("/api/consultas/consulta-antiga/envios", json=DESTINO).json() == envio
     finally:
         engine.dispose()
+
+
+def test_demo_try_out_whatsapp_com_content_sid_preserva_consulta_e_mensagem_enviada(tmp_path, twilio_request):
+    config = replace(
+        settings(tmp_path),
+        twilio_production_sender=False,
+        twilio_content_sid="HX" + "e" * 32,
+        twilio_panorama_content_sid="",
+    )
+    with TestClient(create_app(config, http_transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json=BCB_PAYLOAD)
+    ))) as client:
+        consulta = client.post("/api/consultas/mercado", json=ENTRADA).json()
+        assert consulta["status"] == "SUCESSO"
+        assert consulta["mensagem_gerada"] is not None
+
+        rota = f"/api/consultas/{consulta['id']}/envios"
+        envio = client.post(rota, json=DESTINO).json()
+        assert envio["status"] == "NA_FILA"
+        assert envio["provedor_id"] == "SM" + "1" * 32
+        assert envio["mensagem"] == consulta["mensagem_gerada"]
+        assert "HXe" in (envio["mensagem_enviada"] or "")
+
+        payload = twilio_request.call_args.kwargs["data"]
+        assert payload["ContentSid"] == "HX" + "e" * 32
+        assert "Body" not in payload
+
+        # A consulta no banco permanece com status SUCESSO
+        consulta_recuperada = client.get(f"/api/consultas/{consulta['id']}").json()
+        assert consulta_recuperada["status"] == "SUCESSO"
+        assert consulta_recuperada["mensagem_gerada"] == consulta["mensagem_gerada"]
+
+
+def test_demo_try_out_whatsapp_sem_content_sid_retorna_erro_controlado_e_preserva_consulta(tmp_path, twilio_request):
+    config = replace(
+        settings(tmp_path),
+        twilio_production_sender=False,
+        twilio_content_sid="",
+        twilio_panorama_content_sid="",
+    )
+    with TestClient(create_app(config, http_transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json=BCB_PAYLOAD)
+    ))) as client:
+        consulta = client.post("/api/consultas/mercado", json=ENTRADA).json()
+        assert consulta["status"] == "SUCESSO"
+
+        rota = f"/api/consultas/{consulta['id']}/envios"
+        envio = client.post(rota, json=DESTINO).json()
+        assert envio["status"] == "FALHOU"
+        assert "Envio WhatsApp indisponível no ambiente de demonstração" in envio["erro"]
+        assert "TWILIO_CONTENT_SID" in envio["erro"]
+        twilio_request.assert_not_awaited()
+
+        # Falha de WhatsApp não afeta o sucesso da consulta
+        consulta_recuperada = client.get(f"/api/consultas/{consulta['id']}").json()
+        assert consulta_recuperada["status"] == "SUCESSO"
+        assert consulta_recuperada["mensagem_gerada"] == consulta["mensagem_gerada"]
+
+
+def test_demo_try_out_whatsapp_erro_21654_preserva_consulta_e_registra_falhou(tmp_path, twilio_request):
+    twilio_request.side_effect = None
+    twilio_request.return_value = TwilioResponse(400, json.dumps({
+        "code": 21654,
+        "message": "ContentSid Required",
+        "status": 400,
+    }))
+    config = replace(
+        settings(tmp_path),
+        twilio_production_sender=False,
+        twilio_content_sid="HX" + "d" * 32,
+        twilio_panorama_content_sid="",
+    )
+    with TestClient(create_app(config, http_transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json=BCB_PAYLOAD)
+    ))) as client:
+        consulta = client.post("/api/consultas/mercado", json=ENTRADA).json()
+        assert consulta["status"] == "SUCESSO"
+
+        rota = f"/api/consultas/{consulta['id']}/envios"
+        envio = client.post(rota, json=DESTINO).json()
+        assert envio["status"] == "FALHOU"
+        assert envio["error_code"] == 21654
+        assert "Try out WhatsApp" in envio["erro"]
+        assert "código Twilio 21654" in envio["erro"]
+        assert "ContentSid Required" not in envio["erro"]  # Sem expor payload cru
+
+        # A consulta continua com status SUCESSO e mensagem gerada intacta
+        consulta_recuperada = client.get(f"/api/consultas/{consulta['id']}").json()
+        assert consulta_recuperada["status"] == "SUCESSO"
+        assert consulta_recuperada["mensagem_gerada"] == consulta["mensagem_gerada"]
+
